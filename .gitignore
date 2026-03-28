@@ -1,0 +1,39 @@
+node_modules/
+.DS_Store
+*.log
+.env
+client/node_modules/
+dist/
+/tmp/nexus-*.log
+.nexus-runtime/
+dev-docs/00-vision.md
+.gitnexus
+
+# local agent artifacts
+.agents/
+.claude/
+
+# embedded repos / local clones
+bit-office/
+
+# OA project runtime data (local)
+oa-project/data/
+oa-project/.venv/
+oa-project/logs/
+
+# Local tool dumps / vendored experiments (kept out of repo to avoid huge commits)
+tools/
+
+# Playwright outputs
+playwright-report/
+test-results/
+/tests/e2e/artifacts/
+
+# local runtime / generated data (do not commit)
+logs/
+temp-logs/
+test-logs/
+data/
+
+# legacy backups (kept locally)
+.git.legacy_*/

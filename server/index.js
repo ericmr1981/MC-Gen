@@ -1,0 +1,1959 @@
+import express from 'express';
+import { createServer } from 'http';
+import cors from 'cors';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import os from 'os';
+import { spawn } from 'child_process';
+import net from 'net';
+
+// Import modules
+import { initWebSocket, broadcast } from './websocket.js';
+import * as ClaudeCodeParser from './parsers/claude-code.js';
+import * as CodexParser from './parsers/codex.js';
+import * as OpenClawParser from './parsers/openclaw.js';
+import * as FileMonitor from './monitors/file-monitor.js';
+import * as ProcessMonitor from './monitors/process-monitor.js';
+import * as SessionManager from './session-manager.js';
+import * as UsageManager from './usage/usage-manager.js';
+import * as PricingService from './usage/pricing-service.js';
+import * as ExternalUsageService from './usage/external-usage-service.js';
+import * as ScheduledTasks from './scheduled-tasks.js';
+import { logger, sessionLogger, fileLogger, processLogger } from './utils/logger.js';
+import { registerTokenBenchRoutes } from './tokenbench.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+const PORT = 7878;
+
+// Middleware to parse JSON bodies
+app.use(express.json());
+
+// Enable CORS for all routes to allow frontend communication
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://localhost:7878'], // Vite dev server and production
+  credentials: true
+}));
+
+// TokenBench (code task token benchmarking)
+registerTokenBenchRoutes(app);
+
+function normalizeHistoryLimit(raw, fallback = 200, max = 2000) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  const rounded = Math.floor(n);
+  if (rounded <= 0) return fallback;
+  return Math.min(rounded, max);
+}
+
+app.get('/api/usage/cost-history', (req, res) => {
+  try {
+    const limit = normalizeHistoryLimit(req.query.limit);
+    const sessionId = req.query.sessionId ? String(req.query.sessionId) : null;
+    const tool = req.query.tool ? String(req.query.tool) : null;
+    const items = UsageManager.getCostHistory({ limit, sessionId, tool });
+    const meta = UsageManager.getCostHistoryMeta();
+
+    res.json({
+      items,
+      meta
+    });
+  } catch (error) {
+    logger.error('Cost history query failed', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'cost_history_query_failed'
+    });
+  }
+});
+
+// System metrics API endpoint
+app.get('/api/system/metrics', (req, res) => {
+  try {
+    // Get memory usage
+    const memoryUsage = process.memoryUsage();
+    const totalMemory = os.totalmem();
+    const freeMemory = os.freemem();
+    const usedMemory = totalMemory - freeMemory;
+    const memoryPercentage = ((usedMemory / totalMemory) * 100).toFixed(1);
+
+    // Get CPU usage (average over all cores)
+    const cpus = os.cpus();
+    let totalIdle = 0;
+    let totalTick = 0;
+
+    cpus.forEach(cpu => {
+      for (let type in cpu.times) {
+        totalTick += cpu.times[type];
+      }
+      totalIdle += cpu.times.idle;
+    });
+
+    const totalUsage = totalTick - totalIdle;
+    const cpuPercentage = ((totalUsage / totalTick) * 100).toFixed(1);
+
+    res.json({
+      cpu: {
+        percentage: parseFloat(cpuPercentage),
+        cores: cpus.length
+      },
+      memory: {
+        percentage: parseFloat(memoryPercentage),
+        used: Math.round(usedMemory / 1024 / 1024), // MB
+        total: Math.round(totalMemory / 1024 / 1024), // MB
+        process: {
+          heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024), // MB
+          heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024), // MB
+          rss: Math.round(memoryUsage.rss / 1024 / 1024) // MB
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('System metrics query failed', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'system_metrics_query_failed'
+    });
+  }
+});
+
+// Scheduled tasks API endpoints
+app.get('/api/scheduled-tasks', (req, res) => {
+  try {
+    const tasks = ScheduledTasks.getAllScheduledJobsWithMetadata();
+    res.json({
+      tasks
+    });
+  } catch (error) {
+    logger.error('Scheduled tasks query failed', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'scheduled_tasks_query_failed'
+    });
+  }
+});
+
+// OA Service Management
+const OA_DEFAULT_PORT = 3460;
+const OA_MAX_PORT_SCAN = 10;
+const OA_RUNTIME_DIR = path.join(process.cwd(), '.nexus-runtime');
+const OA_PID_FILE = path.join(OA_RUNTIME_DIR, 'oa.json');
+
+// OA process state
+let oaProcess = null;
+let oaConfig = {
+  port: OA_DEFAULT_PORT,
+  configPath: '',
+  startedByNexus: false
+};
+
+// Ensure runtime directory exists
+function ensureRuntimeDir() {
+  if (!fs.existsSync(OA_RUNTIME_DIR)) {
+    fs.mkdirSync(OA_RUNTIME_DIR, { recursive: true });
+  }
+}
+
+// Save OA process info to file
+function saveOaPidFile(port, pid) {
+  ensureRuntimeDir();
+  const data = {
+    port,
+    pid,
+    startedByNexus: true,
+    startedAt: new Date().toISOString()
+  };
+  fs.writeFileSync(OA_PID_FILE, JSON.stringify(data, null, 2));
+}
+
+// Load OA process info from file
+function loadOaPidFile() {
+  if (fs.existsSync(OA_PID_FILE)) {
+    try {
+      return JSON.parse(fs.readFileSync(OA_PID_FILE, 'utf-8'));
+    } catch (e) {
+      return null;
+    }
+  }
+  return null;
+}
+
+// Clear OA PID file
+function clearOaPidFile() {
+  if (fs.existsSync(OA_PID_FILE)) {
+    fs.unlinkSync(OA_PID_FILE);
+  }
+}
+
+// Check if a port is in use
+function checkPort(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        resolve(true); // Port is in use
+      } else {
+        resolve(false);
+      }
+    });
+    server.once('listening', () => {
+      server.close();
+      resolve(false); // Port is free
+    });
+    server.listen(port, '127.0.0.1');
+  });
+}
+
+// Find an available port starting from default
+async function findAvailablePort(startPort, maxAttempts) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const port = startPort + i;
+    const inUse = await checkPort(port);
+    if (!inUse) {
+      return port;
+    }
+  }
+  return null;
+}
+
+// Check if OA process is running by PID
+function isProcessRunning(pid) {
+  try {
+    process.kill(pid, 0); // Signal 0 just checks if process exists
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Get OA status
+async function getOaStatus() {
+  const pidFile = loadOaPidFile();
+
+  if (!pidFile) {
+    return { running: false, port: OA_DEFAULT_PORT };
+  }
+
+  const { port, pid, startedByNexus } = pidFile;
+
+  // Check if process is still running
+  if (startedByNexus && pid && isProcessRunning(pid)) {
+    return {
+      running: true,
+      port,
+      pid,
+      url: `http://127.0.0.1:${port}`,
+      startedByNexus
+    };
+  }
+
+  // Process not running, clear stale PID file
+  if (startedByNexus) {
+    clearOaPidFile();
+  }
+
+  return { running: false, port: OA_DEFAULT_PORT };
+}
+
+// Stop OA process
+function stopOaProcess() {
+  const pidFile = loadOaPidFile();
+  if (!pidFile || !pidFile.startedByNexus) {
+    return false;
+  }
+
+  const { pid } = pidFile;
+  if (pid && isProcessRunning(pid)) {
+    try {
+      process.kill(pid, 'SIGTERM');
+      clearOaPidFile();
+      oaProcess = null;
+      return true;
+    } catch (e) {
+      logger.error('Failed to stop OA process', { error: e.message });
+    }
+  }
+
+  clearOaPidFile();
+  return false;
+}
+
+// OpenClaw Proxy API endpoints
+let openclawProxyProcesses = new Map(); // Store running proxy processes
+let openclawProxyLogFiles = new Map(); // Store log file paths for each proxy
+
+app.post('/api/openclaw-proxy/start', (req, res) => {
+  try {
+    const { sessionId, logDir = './logs' } = req.body;
+
+    if (!sessionId) {
+      return res.status(400).json({
+        error: 'sessionId is required'
+      });
+    }
+
+    // Try to find the OpenClaw session to get the WebSocket URI (optional - will use default if not found)
+    const session = SessionManager.getSession(sessionId);
+    const isOpenClawSession = session && session.tool && session.tool.toLowerCase().includes('openclaw');
+
+    // Determine the WebSocket URI - use default or from session metadata
+    const wsUri = (session && session.metadata?.webSocketUri) || 'ws://127.0.0.1:18789';
+
+    // Check if a proxy is already running for this session
+    if (openclawProxyProcesses.has(sessionId)) {
+      return res.status(409).json({
+        error: 'Proxy already running for this session'
+      });
+    }
+
+    // Create log directory if it doesn't exist
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+
+    // Prepare command arguments for the Python proxy
+    const proxyArgs = [
+      path.join(__dirname, '..', 'openclaw-proxy', 'cli.py'),
+      wsUri,
+      '--log-dir', logDir
+    ];
+
+    // Add authentication token - use from session metadata, env var, or default token
+    const authToken = (session && session.metadata?.authToken) || process.env.OPENCLAW_TOKEN || 'fd1c17fa9248e8063d232fdb740cdf3cda6def736e3c9e35';
+    proxyArgs.push('--token', authToken);
+
+    // Add verbose flag if needed (for debugging)
+    if (process.env.NODE_ENV === 'development') {
+      proxyArgs.push('--verbose');
+    }
+
+    // Spawn the OpenClaw proxy process
+    const proxyProcess = spawn('python3', proxyArgs, {
+      cwd: path.join(__dirname, '..'),
+      env: { ...process.env }
+    });
+
+    // Store the process reference
+    openclawProxyProcesses.set(sessionId, proxyProcess);
+
+    // Generate fallback log file path (in case proxy doesn't output in time)
+    const timestamp = new Date().toISOString().replace(/[-:.]/g, '').replace('T', '_').split('.')[0];
+    const fallbackLogFilePath = path.join(logDir, `session_${timestamp}.jsonl`);
+
+    let responseSent = false;
+
+    // Handle stderr to capture LOG_FILE: message and send response (proxy uses stderr for immediate output)
+    const handleStderr = (data) => {
+      const output = data.toString();
+      console.log('[DEBUG] Proxy stderr received:', output);  // Debug logging
+
+      if (responseSent) return;
+
+      const lines = output.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('LOG_FILE:')) {
+          console.log('[DEBUG] Found LOG_FILE in stderr!');  // Debug
+          const actualLogFilePath = line.substring('LOG_FILE:'.length).trim();
+          // Convert to relative path for API consistency
+          const relativePath = actualLogFilePath.replace(process.cwd() + '/', '');
+
+          openclawProxyLogFiles.set(sessionId, relativePath);
+
+          res.json({
+            success: true,
+            sessionId,
+            logFile: relativePath,
+            wsUri,
+            message: 'OpenClaw proxy started successfully'
+          });
+          responseSent = true;
+          break;
+        }
+      }
+    };
+
+    proxyProcess.stderr?.on('data', handleStderr);
+
+    // Also log stderr errors for debugging
+    proxyProcess.stderr?.on('data', (data) => {
+      const output = data.toString();
+      if (!output.startsWith('LOG_FILE:')) {
+        logger.error(`OpenClaw proxy error for ${sessionId}`, { error: output });
+      }
+    });
+
+    proxyProcess.on('error', (err) => {
+      logger.error('OpenClaw proxy process error', { sessionId, error: err.message });
+      openclawProxyProcesses.delete(sessionId);
+      openclawProxyLogFiles.delete(sessionId);
+      if (!responseSent) {
+        res.status(500).json({ error: 'failed_to_start_openclaw_proxy' });
+        responseSent = true;
+      }
+    });
+
+    proxyProcess.on('close', (code) => {
+      logger.info('OpenClaw proxy process closed', { sessionId, code });
+      openclawProxyProcesses.delete(sessionId);
+      openclawProxyLogFiles.delete(sessionId);
+    });
+
+    // Set timeout - if we don't get log file path within 3 seconds, use fallback
+    setTimeout(() => {
+      if (!responseSent) {
+        openclawProxyLogFiles.set(sessionId, fallbackLogFilePath);
+        res.json({
+          success: true,
+          sessionId,
+          logFile: fallbackLogFilePath,
+          wsUri,
+          message: 'OpenClaw proxy started successfully'
+        });
+        responseSent = true;
+      }
+    }, 3000);
+
+  } catch (error) {
+    logger.error('Failed to start OpenClaw proxy', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'failed_to_start_openclaw_proxy'
+    });
+  }
+});
+
+app.post('/api/openclaw-proxy/stop', (req, res) => {
+  try {
+    const { sessionId } = req.body;
+
+    if (!sessionId) {
+      return res.status(400).json({
+        error: 'sessionId is required'
+      });
+    }
+
+    const proxyProcess = openclawProxyProcesses.get(sessionId);
+    if (!proxyProcess) {
+      return res.status(404).json({
+        error: 'No running proxy found for this session'
+      });
+    }
+
+    // Kill the proxy process
+    proxyProcess.kill('SIGTERM');
+
+    // Clean up references
+    openclawProxyProcesses.delete(sessionId);
+    openclawProxyLogFiles.delete(sessionId);
+
+    res.json({
+      success: true,
+      sessionId,
+      message: 'OpenClaw proxy stopped successfully'
+    });
+
+  } catch (error) {
+    logger.error('Failed to stop OpenClaw proxy', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'failed_to_stop_openclaw_proxy'
+    });
+  }
+});
+
+app.get('/api/openclaw-proxy/logs', (req, res) => {
+  try {
+    const { path: logPath } = req.query;
+
+    if (!logPath) {
+      return res.status(400).json({
+        error: 'path parameter is required'
+      });
+    }
+
+    // Validate that the path is within allowed directories to prevent directory traversal
+    const resolvedPath = path.resolve(logPath);
+    const allowedDir = path.resolve('./logs');
+    if (!resolvedPath.startsWith(allowedDir)) {
+      return res.status(403).json({
+        error: 'Invalid log path'
+      });
+    }
+
+    if (!fs.existsSync(resolvedPath)) {
+      return res.status(404).json({
+        error: 'Log file not found'
+      });
+    }
+
+    // Read the log file
+    const content = fs.readFileSync(resolvedPath, 'utf-8');
+    const lines = content.split('\n').filter(line => line.trim() !== '');
+
+    // Parse JSON lines
+    const logs = lines.map(line => {
+      try {
+        return JSON.parse(line);
+      } catch (e) {
+        return { error: 'Failed to parse log line', content: line };
+      }
+    });
+
+    res.json({
+      logs,
+      count: logs.length
+    });
+
+  } catch (error) {
+    logger.error('Failed to read OpenClaw proxy logs', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'failed_to_read_openclaw_logs'
+    });
+  }
+});
+
+app.get('/api/openclaw-proxy/status', (req, res) => {
+  try {
+    const activeProxies = [];
+    for (const [sessionId, process] of openclawProxyProcesses.entries()) {
+      activeProxies.push({
+        sessionId,
+        status: 'running',
+        logFile: openclawProxyLogFiles.get(sessionId)
+      });
+    }
+
+    res.json({
+      activeProxies,
+      count: activeProxies.length
+    });
+  } catch (error) {
+    logger.error('Failed to get OpenClaw proxy status', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'failed_to_get_openclaw_status'
+    });
+  }
+});
+
+// OA Service API endpoints
+
+// GET /api/oa/status - Get OA service status
+app.get('/api/oa/status', async (req, res) => {
+  try {
+    const status = await getOaStatus();
+    res.json(status);
+  } catch (error) {
+    logger.error('Failed to get OA status', { error: error?.message || String(error) });
+    res.status(500).json({ error: 'failed_to_get_oa_status' });
+  }
+});
+
+// POST /api/oa/start - Start OA service
+app.post('/api/oa/start', async (req, res) => {
+  try {
+    // Check if already running
+    const currentStatus = await getOaStatus();
+    if (currentStatus.running) {
+      return res.json({
+        success: true,
+        running: true,
+        port: currentStatus.port,
+        pid: currentStatus.pid,
+        url: currentStatus.url,
+        message: 'OA service already running'
+      });
+    }
+
+    // Get config path from request or use default
+    const configPath = req.body.configPath || path.join(process.cwd(), 'oa-project', 'config.yaml');
+
+    // Check if config exists
+    if (!fs.existsSync(configPath)) {
+      return res.status(400).json({ error: 'OA config file not found', configPath });
+    }
+
+    // Find available port
+    const port = await findAvailablePort(OA_DEFAULT_PORT, OA_MAX_PORT_SCAN);
+    if (!port) {
+      return res.status(500).json({ error: 'No available port found' });
+    }
+
+    // Spawn OA process
+    const oaArgs = ['serve', '--config', configPath, '--port', String(port), '--no-open'];
+
+    const oaSpawn = spawn('oa', oaArgs, {
+      cwd: path.dirname(configPath),
+      env: { ...process.env },
+      detached: false
+    });
+
+    // Save PID file
+    saveOaPidFile(port, oaSpawn.pid);
+
+    // Handle process events
+    oaSpawn.stdout?.on('data', (data) => {
+      logger.info(`OA stdout: ${data.toString().trim()}`);
+    });
+
+    oaSpawn.stderr?.on('data', (data) => {
+      logger.info(`OA stderr: ${data.toString().trim()}`);
+    });
+
+    oaSpawn.on('error', (err) => {
+      logger.error('OA process error', { error: err.message });
+      clearOaPidFile();
+    });
+
+    oaSpawn.on('close', (code) => {
+      logger.info('OA process closed', { code });
+      clearOaPidFile();
+    });
+
+    oaProcess = oaSpawn;
+
+    // Wait a bit for the server to start
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    res.json({
+      success: true,
+      running: true,
+      port,
+      pid: oaSpawn.pid,
+      url: `http://127.0.0.1:${port}`,
+      message: 'OA service started successfully'
+    });
+
+  } catch (error) {
+    logger.error('Failed to start OA service', { error: error?.message || String(error) });
+    res.status(500).json({ error: 'failed_to_start_oa_service' });
+  }
+});
+
+// POST /api/oa/stop - Stop OA service
+app.post('/api/oa/stop', (req, res) => {
+  try {
+    const stopped = stopOaProcess();
+
+    if (stopped) {
+      res.json({ success: true, message: 'OA service stopped successfully' });
+    } else {
+      res.status(404).json({ error: 'OA service not started by Nexus or not running' });
+    }
+  } catch (error) {
+    logger.error('Failed to stop OA service', { error: error?.message || String(error) });
+    res.status(500).json({ error: 'failed_to_stop_oa_service' });
+  }
+});
+
+// GET /api/oa/logs - Get OA logs (if available)
+app.get('/api/oa/logs', (req, res) => {
+  // OA doesn't have a standard log file, but we can provide info
+  res.json({
+    message: 'OA logs are streamed to server console',
+    logLocation: 'Nexus server console'
+  });
+});
+
+// Get all agents grouped by category with collapsible sections
+app.get('/api/agents', (req, res) => {
+  try {
+    const sessions = SessionManager.getAllSessions();
+    const now = Date.now();
+    const IDLE_THRESHOLD = 3 * 60 * 1000; // 3 minutes
+
+    // Decode projectDir from encoded format (e.g., -Users-ericmr-Docs-MyProject -> MyProject)
+    const decodeProjectName = (encodedPath) => {
+      if (!encodedPath) return null;
+      const decoded = encodedPath.replace(/^-+/, '').replace(/-+/g, '/');
+      const parts = decoded.split('/').filter(p => p);
+      return parts.length > 0 ? parts[parts.length - 1] : null;
+    };
+
+    // Helper to determine agent status
+    const getStatus = (lastModified, state) => {
+      const idleDuration = now - (lastModified || Date.now());
+      if (state === 'active') {
+        return { status: 'working', statusColor: 'green' };
+      } else if (state === 'idle') {
+        if (idleDuration > IDLE_THRESHOLD) {
+          return { status: 'offline', statusColor: 'gray' };
+        }
+        return { status: 'idle', statusColor: 'yellow' };
+      }
+      return { status: 'offline', statusColor: 'red' };
+    };
+
+    // Categories with agent data
+    const categories = {
+      openclaw: { agents: new Map(), sessionCount: new Map(), paths: new Map() },
+      claudeCode: { agents: new Map(), sessionCount: new Map(), paths: new Map() },
+      codex: { agents: new Map(), sessionCount: new Map(), paths: new Map() },
+      web: { agents: new Map(), sessionCount: new Map(), paths: new Map() },
+      other: { agents: new Map(), sessionCount: new Map(), paths: new Map() }
+    };
+
+    // Process sessions
+    for (const session of sessions) {
+      const { tool, agentId, projectDir, filePath, state, lastModified } = session;
+      let category, id, fullPath;
+
+      if (tool === 'openclaw') {
+        category = 'openclaw';
+        id = agentId;
+        fullPath = filePath || `~/.openclaw/agents/${agentId}/`;
+      } else if (tool === 'claude-code') {
+        category = 'claudeCode';
+        id = decodeProjectName(projectDir);
+        fullPath = projectDir || `~/.claude/projects/${id}/`;
+      } else if (tool === 'codex') {
+        category = 'codex';
+        id = 'Codex';
+        fullPath = filePath || '~/.codex/sessions/';
+      } else if (tool === 'web' || tool === 'browser') {
+        category = 'web';
+        id = session.name || 'Web Tool';
+        fullPath = 'Web-based tool';
+      } else {
+        category = 'other';
+        id = session.name || agentId || 'Unknown';
+        fullPath = filePath || 'Unknown location';
+      }
+
+      if (!id || !category) continue;
+
+      const { status, statusColor } = getStatus(lastModified, state);
+
+      // Update agent map with highest priority state
+      const existing = categories[category].agents.get(id);
+      let statePriority = 0;
+      if (state === 'active') statePriority = 3;
+      else if (state === 'idle') statePriority = 2;
+      else if (state === 'cooling') statePriority = 1;
+
+      if (!existing || statePriority > existing.statePriority) {
+        categories[category].agents.set(id, { status, statusColor, statePriority });
+        categories[category].paths.set(id, fullPath);
+      }
+
+      // Count sessions
+      categories[category].sessionCount.set(id, (categories[category].sessionCount.get(id) || 0) + 1);
+    }
+
+    // Scan directories for all agents (not just active)
+    const fsExists = (dir) => {
+      try {
+        return fs.existsSync(dir);
+      } catch {
+        return false;
+      }
+    };
+
+    // Scan OpenClaw agents
+    const openclawDir = path.join(os.homedir(), '.openclaw', 'agents');
+    if (fsExists(openclawDir)) {
+      const entries = fs.readdirSync(openclawDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const agentPath = path.join(openclawDir, entry.name);
+          if (!categories.openclaw.agents.has(entry.name)) {
+            categories.openclaw.agents.set(entry.name, { status: 'offline', statusColor: 'gray', statePriority: 0 });
+            categories.openclaw.paths.set(entry.name, agentPath);
+          }
+        }
+      }
+    }
+
+    // Scan Claude Code projects
+    const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+    if (fsExists(claudeDir)) {
+      const entries = fs.readdirSync(claudeDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const projectName = decodeProjectName(entry.name);
+          const projectPath = path.join(claudeDir, entry.name);
+          if (projectName && !categories.claudeCode.agents.has(projectName)) {
+            categories.claudeCode.agents.set(projectName, { status: 'offline', statusColor: 'gray', statePriority: 0 });
+            categories.claudeCode.paths.set(projectName, projectPath);
+          }
+        }
+      }
+    }
+
+    // Build response
+    const buildAgentsList = (catKey) => {
+      return Array.from(categories[catKey].agents.entries()).map(([agentId, data]) => ({
+        agentId,
+        status: data.status,
+        statusColor: data.statusColor,
+        sessionCount: categories[catKey].sessionCount.get(agentId) || 0,
+        fullPath: categories[catKey].paths.get(agentId) || ''
+      })).sort((a, b) => {
+        const statusOrder = { working: 0, idle: 1, offline: 2 };
+        const statusDiff = statusOrder[a.statusColor] - statusOrder[b.statusColor];
+        if (statusDiff !== 0) return statusDiff;
+        return a.agentId.localeCompare(b.agentId);
+      });
+    };
+
+    const result = {
+      categories: [
+        {
+          key: 'openclaw',
+          title: 'OpenClaw',
+          agents: buildAgentsList('openclaw'),
+          defaultExpanded: true
+        },
+        {
+          key: 'claudeCode',
+          title: 'Claude Code',
+          agents: buildAgentsList('claudeCode'),
+          defaultExpanded: true
+        },
+        {
+          key: 'codex',
+          title: 'Codex',
+          agents: buildAgentsList('codex'),
+          defaultExpanded: false
+        },
+        {
+          key: 'web',
+          title: 'Web Apps',
+          agents: buildAgentsList('web'),
+          defaultExpanded: false
+        },
+        {
+          key: 'other',
+          title: 'Other',
+          agents: buildAgentsList('other'),
+          defaultExpanded: false
+        }
+      ],
+      totalAgents: Object.values(categories).reduce((sum, cat) => sum + cat.agents.size, 0)
+    };
+
+    res.json(result);
+  } catch (error) {
+    logger.error('Failed to get agents status', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'failed_to_get_agents'
+    });
+  }
+});
+
+// Get OpenClaw agents status - lists ALL agents from disk, not just active sessions
+app.get('/api/openclaw-agents', (req, res) => {
+  try {
+    const sessions = SessionManager.getAllSessions();
+    const now = Date.now();
+    const IDLE_THRESHOLD = 3 * 60 * 1000; // 3 minutes
+
+    // Build a map of active session info by agentId
+    const activeAgentMap = new Map();
+    for (const session of sessions) {
+      if (session.tool !== 'openclaw' || !session.agentId) continue;
+      const agentId = session.agentId;
+      const lastModified = session.lastModified || Date.now();
+      const idleDuration = now - lastModified;
+
+      let statePriority = 0;
+      if (session.state === 'active') statePriority = 3;
+      else if (session.state === 'idle') statePriority = 2;
+      else if (session.state === 'cooling') statePriority = 1;
+
+      const existing = activeAgentMap.get(agentId);
+      if (!existing || statePriority > existing.statePriority) {
+        let status, statusColor;
+        if (session.state === 'active') {
+          status = 'working';
+          statusColor = 'green';
+        } else if (session.state === 'idle') {
+          if (idleDuration > IDLE_THRESHOLD) {
+            status = 'offline';
+            statusColor = 'gray';
+          } else {
+            status = 'idle';
+            statusColor = 'yellow';
+          }
+        } else {
+          status = 'offline';
+          statusColor = 'red';
+        }
+        activeAgentMap.set(agentId, { status, statusColor, statePriority });
+      }
+    }
+
+    // Count sessions per agent
+    const sessionCountMap = new Map();
+    for (const session of sessions) {
+      if (session.tool !== 'openclaw' || !session.agentId) continue;
+      sessionCountMap.set(session.agentId, (sessionCountMap.get(session.agentId) || 0) + 1);
+    }
+
+    // Scan the actual agents directory to find ALL agents
+    const agentsDir = path.join(os.homedir(), '.openclaw', 'agents');
+
+    const allAgentIds = new Set(activeAgentMap.keys());
+
+    if (fs.existsSync(agentsDir)) {
+      const entries = fs.readdirSync(agentsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          allAgentIds.add(entry.name);
+        }
+      }
+    }
+
+    // Build the full agent list
+    const agents = Array.from(allAgentIds).map(agentId => {
+      const active = activeAgentMap.get(agentId);
+      const status = active ? active.status : 'offline';
+      const statusColor = active ? active.statusColor : 'gray';
+      const sessionCount = sessionCountMap.get(agentId) || 0;
+
+      return {
+        agentId,
+        status,
+        statusColor,
+        sessionCount
+      };
+    });
+
+    // Sort by status (working > idle > offline), then by name
+    const statusOrder = { working: 0, idle: 1, offline: 2 };
+    agents.sort((a, b) => {
+      const statusDiff = statusOrder[a.status] - statusOrder[b.status];
+      if (statusDiff !== 0) return statusDiff;
+      return a.agentId.localeCompare(b.agentId);
+    });
+
+    res.json({
+      agents,
+      count: agents.length
+    });
+  } catch (error) {
+    logger.error('Failed to get OpenClaw agents status', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'failed_to_get_openclaw_agents'
+    });
+  }
+});
+
+// Get Claude Code agents status - lists all projects/agents from disk
+app.get('/api/claude-agents', (req, res) => {
+  try {
+    const sessions = SessionManager.getAllSessions();
+    const now = Date.now();
+    const IDLE_THRESHOLD = 3 * 60 * 1000; // 3 minutes
+
+    // Decode projectDir from encoded format (e.g., -Users-ericmr-Docs-MyProject -> MyProject)
+    // Claude Code encodes paths by replacing / with - and prepending dashes
+    const decodeProjectName = (encodedPath) => {
+      if (!encodedPath) return null;
+      // Remove leading dashes and replace - with / to decode
+      const decoded = encodedPath.replace(/^-+/, '').replace(/-+/g, '/');
+      // Get the last segment (basename)
+      const parts = decoded.split('/').filter(p => p);
+      return parts.length > 0 ? parts[parts.length - 1] : null;
+    };
+
+    // Build a map of active session info by decoded project name
+    const activeProjectMap = new Map();
+
+    for (const session of sessions) {
+      if (session.tool !== 'claude-code' || !session.projectDir) continue;
+      const project = decodeProjectName(session.projectDir);
+      if (!project) continue;
+
+      const lastModified = session.lastModified || Date.now();
+      const idleDuration = now - lastModified;
+
+      let statePriority = 0;
+      if (session.state === 'active') statePriority = 3;
+      else if (session.state === 'idle') statePriority = 2;
+      else if (session.state === 'cooling') statePriority = 1;
+
+      const existing = activeProjectMap.get(project);
+      if (!existing || statePriority > existing.statePriority) {
+        let status, statusColor;
+        if (session.state === 'active') {
+          status = 'working';
+          statusColor = 'green';
+        } else if (session.state === 'idle') {
+          if (idleDuration > IDLE_THRESHOLD) {
+            status = 'offline';
+            statusColor = 'gray';
+          } else {
+            status = 'idle';
+            statusColor = 'yellow';
+          }
+        } else {
+          status = 'offline';
+          statusColor = 'red';
+        }
+        activeProjectMap.set(project, { status, statusColor, statePriority });
+      }
+    }
+
+    // Count sessions per project
+    const sessionCountMap = new Map();
+    for (const session of sessions) {
+      if (session.tool !== 'claude-code' || !session.projectDir) continue;
+      const project = decodeProjectName(session.projectDir);
+      if (!project) continue;
+      sessionCountMap.set(project, (sessionCountMap.get(project) || 0) + 1);
+    }
+
+    // Start with active projects
+    const allProjectIds = new Set(activeProjectMap.keys());
+
+    // Scan the actual projects directory to find ALL projects
+    const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+
+    // Add projects from disk that aren't currently active
+    if (fs.existsSync(projectsDir)) {
+      const entries = fs.readdirSync(projectsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const projectName = decodeProjectName(entry.name);
+          if (projectName) {
+            allProjectIds.add(projectName);
+          }
+        }
+      }
+    }
+
+    // Build the full agent list
+    const agents = Array.from(allProjectIds).map(projectId => {
+      const active = activeProjectMap.get(projectId);
+      const status = active ? active.status : 'offline';
+      const statusColor = active ? active.statusColor : 'gray';
+      const sessionCount = sessionCountMap.get(projectId) || 0;
+
+      return {
+        agentId: projectId,
+        status,
+        statusColor,
+        sessionCount
+      };
+    });
+
+    // Sort by status (working > idle > offline), then by name
+    const statusOrder = { working: 0, idle: 1, offline: 2 };
+    agents.sort((a, b) => {
+      const statusDiff = statusOrder[a.status] - statusOrder[b.status];
+      if (statusDiff !== 0) return statusDiff;
+      return a.agentId.localeCompare(b.agentId);
+    });
+
+    res.json({
+      agents,
+      count: agents.length
+    });
+  } catch (error) {
+    logger.error('Failed to get Claude Code agents status', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'failed_to_get_claude_agents'
+    });
+  }
+});
+
+app.get('/api/scheduled-tasks/upcoming', (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const tasks = ScheduledTasks.getUpcomingJobs(days);
+    res.json({
+      tasks
+    });
+  } catch (error) {
+    logger.error('Upcoming scheduled tasks query failed', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'upcoming_scheduled_tasks_query_failed'
+    });
+  }
+});
+
+app.post('/api/scheduled-tasks/calendar-range', (req, res) => {
+  try {
+    const { startDate, endDate } = req.body;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        error: 'missing_start_date_or_end_date'
+      });
+    }
+
+    const tasks = ScheduledTasks.getScheduledJobsInRange(startDate, endDate);
+    res.json({
+      tasks
+    });
+  } catch (error) {
+    logger.error('Calendar range scheduled tasks query failed', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'calendar_range_scheduled_tasks_query_failed'
+    });
+  }
+});
+
+app.get('/api/scheduled-tasks/:jobId', (req, res) => {
+  try {
+    const jobId = req.params.jobId;
+    const task = ScheduledTasks.getScheduledJob(jobId);
+
+    if (!task) {
+      return res.status(404).json({
+        error: 'task_not_found'
+      });
+    }
+
+    res.json({
+      task
+    });
+  } catch (error) {
+    logger.error('Scheduled task detail query failed', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'scheduled_task_detail_query_failed'
+    });
+  }
+});
+
+app.get('/api/scheduled-tasks/:jobId/history', (req, res) => {
+  try {
+    const jobId = req.params.jobId;
+    const limit = parseInt(req.query.limit) || 20;
+
+    const history = ScheduledTasks.getJobRunHistory(jobId, limit);
+    res.json({
+      history
+    });
+  } catch (error) {
+    logger.error('Scheduled task history query failed', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'scheduled_task_history_query_failed'
+    });
+  }
+});
+
+app.patch('/api/scheduled-tasks/:jobId/state', (req, res) => {
+  try {
+    const jobId = req.params.jobId;
+    const { enabled } = req.body;
+
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({
+        error: 'invalid_enabled_value'
+      });
+    }
+
+    const result = ScheduledTasks.updateJobState(jobId, enabled);
+
+    if (!result.success) {
+      return res.status(404).json({
+        error: result.error
+      });
+    }
+
+    res.json({
+      success: true,
+      task: result.job
+    });
+  } catch (error) {
+    logger.error('Scheduled task state update failed', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'scheduled_task_state_update_failed'
+    });
+  }
+});
+
+// Delete scheduled task
+app.delete('/api/scheduled-tasks/:jobId', (req, res) => {
+  try {
+    const jobId = req.params.jobId;
+    const result = ScheduledTasks.deleteJob(jobId);
+
+    if (!result.success) {
+      return res.status(404).json({
+        error: result.error
+      });
+    }
+
+    res.json({
+      success: true,
+      task: result.job
+    });
+  } catch (error) {
+    logger.error('Scheduled task delete failed', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'scheduled_task_delete_failed'
+    });
+  }
+});
+
+// Update full scheduled task
+app.put('/api/scheduled-tasks/:jobId', (req, res) => {
+  try {
+    const jobId = req.params.jobId;
+    const newData = req.body;
+
+    // Validate required fields
+    if (!newData.name) {
+      return res.status(400).json({
+        error: 'name_required'
+      });
+    }
+
+    const result = ScheduledTasks.updateJob(jobId, newData);
+
+    if (!result.success) {
+      return res.status(404).json({
+        error: result.error
+      });
+    }
+
+    res.json({
+      success: true,
+      task: result.job
+    });
+  } catch (error) {
+    logger.error('Scheduled task update failed', { error: error?.message || String(error) });
+    res.status(500).json({
+      error: 'scheduled_task_update_failed'
+    });
+  }
+});
+
+// Serve static files from dist directory
+app.use(express.static(path.join(__dirname, '..', 'dist')));
+
+// Catch-all route to serve index.html for client-side routing
+// This ensures React Router handles all frontend routes
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
+});
+
+// Create HTTP server
+const server = createServer(app);
+
+// Track active project directories
+let activeProjectDirs = new Set();
+// Track the last time we observed incremental OpenClaw lines for each session file.
+const openclawLineActivityByFile = new Map();
+
+// Heuristics for "currently running" sessions:
+// - Claude Code: prefer `lsof`-discovered open `.jsonl` files per PID. If unavailable, fall back to "newest 1 JSONL per active dir".
+// - OpenClaw:
+//   - discovery is broad (recent file mtime) so candidates appear reliably;
+//   - liveness is strict (lock + recent incremental lines) so stale sessions exit promptly.
+const CLAUDE_RECENT_MAX_FILES_PER_DIR = 5;
+const CLAUDE_RECENT_MTIME_GRACE_MS = 30 * 60 * 1000; // keep recently-updated sessions visible after exit
+const CODEX_DISCOVERY_MAX_FILES = 12;
+const CODEX_DISCOVERY_MTIME_GRACE_MS = 30 * 60 * 1000; // periodically discover recently-updated Codex sessions
+const OPENCLAW_DISCOVERY_MAX_FILES_PER_AGENT = 3;
+const OPENCLAW_DISCOVERY_MAX_FILES = 12;
+const OPENCLAW_DISCOVERY_MTIME_GRACE_MS = 45 * 60 * 1000; // discovery-only window
+const OPENCLAW_LIVENESS_RECENT_ACTIVITY_MS = 15 * 60 * 1000; // keep visible after last observed new line
+const USAGE_BACKFILL_BROADCAST_EVERY = 40;
+const EXTERNAL_USAGE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
+function getUsageTotals() {
+  const base = UsageManager.getUsageTotals();
+  const live = UsageManager.getLiveUsageTotals();
+  return ExternalUsageService.applyExternalUsageOverrides(base, live);
+}
+
+function broadcastUsageTotals() {
+  broadcast({
+    type: 'usage_totals',
+    ...getUsageTotals()
+  });
+}
+
+function parseMessagesFromLines(lines, parser) {
+  if (!Array.isArray(lines) || lines.length === 0) return [];
+  return lines.map(line => parser.parseMessage(line)).filter(Boolean);
+}
+
+function getLatestModelFromLines(lines, parser) {
+  if (!parser?.parseUsageEvent || !Array.isArray(lines) || lines.length === 0) return null;
+
+  // Walk backwards to find the newest model hint.
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const event = parser.parseUsageEvent(lines[i]);
+    if (!event) continue;
+
+    // Claude/OpenClaw: delta events carry model
+    if (event.kind === 'delta' && event.model) return String(event.model);
+
+    // Codex: model events
+    if (event.kind === 'model' && event.model) return String(event.model);
+
+    // Some parsers may emit a plain { model: ... }
+    if (event.model) return String(event.model);
+  }
+
+  return null;
+}
+
+function ingestUsageFromLines(lines, parser, toolName, sessionId) {
+  if (!parser.parseUsageEvent || !Array.isArray(lines) || lines.length === 0) return false;
+
+  let changed = false;
+  for (const line of lines) {
+    const event = parser.parseUsageEvent(line);
+    if (!event) continue;
+    const applied = UsageManager.ingestUsageEvent({
+      sessionId,
+      tool: toolName,
+      event,
+      calculateCostUsd: PricingService.calculateCostUsd,
+      calculateCostBreakdown: PricingService.calculateCostBreakdown,
+      getPricingMeta: PricingService.getPricingMeta
+    });
+    if (applied) changed = true;
+  }
+
+  return changed;
+}
+
+function collectUsageBackfillEntries() {
+  const entries = [];
+  const seen = new Set();
+
+  const addEntry = (filePath, parser, toolName) => {
+    const resolved = path.resolve(filePath);
+    if (seen.has(resolved)) return;
+    seen.add(resolved);
+    entries.push({ filePath: resolved, parser, toolName });
+  };
+
+  FileMonitor.scanAllProjects(
+    ClaudeCodeParser.CLAUDE_PROJECTS_DIR,
+    (filePath) => addEntry(filePath, ClaudeCodeParser, 'claude-code'),
+    () => {},
+    { recursive: true }
+  );
+
+  FileMonitor.scanCodexSessions(
+    CodexParser.CODEX_SESSIONS_DIR,
+    (filePath) => addEntry(filePath, CodexParser, 'codex'),
+    () => {},
+    { silent: true }
+  );
+
+  FileMonitor.scanOpenClawAgents(
+    OpenClawParser.OPENCLAW_AGENTS_DIR,
+    (filePath) => addEntry(filePath, OpenClawParser, 'openclaw'),
+    () => {}
+  );
+
+  return entries;
+}
+
+async function runUsageBackfill() {
+  const entries = collectUsageBackfillEntries();
+  const totalFiles = entries.length;
+
+  UsageManager.setBackfillProgress({
+    status: 'running',
+    scannedFiles: 0,
+    totalFiles
+  });
+  broadcastUsageTotals();
+
+  let scannedFiles = 0;
+  let usageChangedSinceLastBroadcast = false;
+
+  for (const entry of entries) {
+    scannedFiles += 1;
+    const { filePath, parser, toolName } = entry;
+    const sessionId = parser.getSessionId(filePath);
+
+    let lines = [];
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      lines = content.split('\n').filter(line => line.trim());
+    } catch {
+      // Skip unreadable files.
+    }
+
+    if (ingestUsageFromLines(lines, parser, toolName, sessionId)) {
+      usageChangedSinceLastBroadcast = true;
+    }
+
+    const progressChanged = UsageManager.setBackfillProgress({
+      status: 'running',
+      scannedFiles,
+      totalFiles
+    });
+
+    if (
+      usageChangedSinceLastBroadcast ||
+      progressChanged ||
+      scannedFiles === totalFiles
+    ) {
+      if (
+        scannedFiles % USAGE_BACKFILL_BROADCAST_EVERY === 0 ||
+        scannedFiles === totalFiles
+      ) {
+        broadcastUsageTotals();
+        usageChangedSinceLastBroadcast = false;
+      }
+    }
+
+    if (scannedFiles % 20 === 0) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+  }
+
+  UsageManager.setBackfillProgress({
+    status: 'done',
+    scannedFiles: totalFiles,
+    totalFiles
+  });
+  broadcastUsageTotals();
+}
+
+// Process a JSONL file
+function processFile(filePath, parser, toolName) {
+  // Normalize early so all downstream maps/sets compare correctly.
+  filePath = path.resolve(filePath);
+
+  const sessionId = parser.getSessionId(filePath);
+  const projectDir = path.resolve(path.dirname(filePath));
+  const lines = FileMonitor.readIncrementalLines(filePath, 'live-monitor');
+  if (toolName === 'openclaw' && lines.length > 0) {
+    openclawLineActivityByFile.set(filePath, Date.now());
+  }
+  const parsedMessages = parseMessagesFromLines(lines, parser);
+  const usageChanged = ingestUsageFromLines(lines, parser, toolName, sessionId);
+  let runningChanged = false;
+  const existingSession = SessionManager.getSession(sessionId);
+
+  // Check if this is a new session
+  if (!existingSession) {
+    const projectName = parser.getProjectName(path.dirname(filePath), filePath);
+    const agentId = (typeof parser.getAgentId === 'function') ? parser.getAgentId(filePath) : null;
+    const model = getLatestModelFromLines(lines, parser);
+
+    // Debug logging for agentId
+    console.log(`[DEBUG] New session ${sessionId}: agentId=${agentId}, model=${model}, filePath=${filePath}`);
+
+    SessionManager.createSession(
+      sessionId,
+      toolName,
+      projectName,
+      filePath,
+      projectDir,
+      { agentId, model }
+    );
+    runningChanged = UsageManager.upsertLiveSession(sessionId, toolName, 'active');
+
+    // Read and append messages from incremental lines.
+    const appended = SessionManager.addMessages(sessionId, parsedMessages) || [];
+
+    sessionLogger.sessionDiscovered(sessionId, projectName, toolName, filePath);
+
+    // Broadcast new session
+    broadcast({
+      type: 'session_init',
+      sessionId,
+      tool: toolName,
+      name: projectName,
+      agentId,
+      model,
+      messages: appended,
+      state: 'active'
+    });
+  } else {
+    const session = existingSession;
+    if (session && lines.length > 0 && session.state === 'idle') {
+      SessionManager.setSessionState(sessionId, 'active', handleStateChange);
+    }
+
+    // Best-effort: update session model/agentId when we observe it in new lines.
+    const nextModel = getLatestModelFromLines(lines, parser);
+    const nextAgentId = (typeof parser.getAgentId === 'function') ? parser.getAgentId(filePath) : null;
+
+    // Debug logging for session update
+    console.log(`[DEBUG] Session update ${sessionId}: agentId=${nextAgentId}, model=${nextModel}`);
+
+    if (SessionManager.updateSessionMeta(sessionId, { model: nextModel, agentId: nextAgentId })) {
+      broadcast({
+        type: 'session_update',
+        sessionId,
+        agentId: nextAgentId,
+        model: nextModel
+      });
+    }
+
+    if (parsedMessages.length > 0) {
+      const appended = SessionManager.addMessages(sessionId, parsedMessages) || [];
+
+      if (appended.length > 0) {
+        // Broadcast each new message
+        appended.forEach(message => {
+          broadcast({
+            type: 'message_add',
+            sessionId,
+            message
+          });
+        });
+      }
+
+      sessionLogger.sessionMessages(sessionId, toolName, appended.length);
+    }
+  }
+
+  if (usageChanged || runningChanged) {
+    broadcastUsageTotals();
+  }
+}
+
+function safeIsDir(p) {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function isUnderDir(child, parent) {
+  const rel = path.relative(path.resolve(parent), path.resolve(child));
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+function loadClaudeSessionsForProjectDir(projectDir, activeClaudeFiles) {
+  const dir = path.resolve(projectDir);
+  const activeInDir = [];
+  if (activeClaudeFiles && activeClaudeFiles.size > 0) {
+    for (const filePath of activeClaudeFiles) {
+      if (isUnderDir(filePath, dir)) activeInDir.push(filePath);
+    }
+  }
+
+  if (activeInDir.length > 0) {
+    for (const filePath of activeInDir) {
+      processFile(filePath, ClaudeCodeParser, 'claude-code');
+    }
+    return;
+  }
+
+  // Fallback: load a few recently-updated JSONLs so "just finished" sessions still show up,
+  // but avoid loading every historical session in the directory.
+  const recent = FileMonitor.getRecentSessionFiles(projectDir, {
+    maxAgeMs: CLAUDE_RECENT_MTIME_GRACE_MS,
+    maxCount: CLAUDE_RECENT_MAX_FILES_PER_DIR,
+    recursive: true
+  });
+  if (recent.length > 0) {
+    for (const filePath of recent) processFile(filePath, ClaudeCodeParser, 'claude-code');
+    return;
+  }
+
+  // Last resort: show the newest single JSONL.
+  const mostRecent = FileMonitor.getMostRecentSession(projectDir, { recursive: true });
+  if (mostRecent) processFile(mostRecent, ClaudeCodeParser, 'claude-code');
+}
+
+function loadOpenClawSessionsInDir(sessionsDir, activeSessionFiles) {
+  for (const filePath of activeSessionFiles) {
+    if (path.resolve(path.dirname(filePath)) !== path.resolve(sessionsDir)) continue;
+    processFile(filePath, OpenClawParser, 'openclaw');
+  }
+}
+
+function discoverRecentCodexFiles() {
+  const now = Date.now();
+  const candidates = [];
+
+  FileMonitor.scanCodexSessions(
+    CodexParser.CODEX_SESSIONS_DIR,
+    (filePath) => {
+      const resolved = path.resolve(filePath);
+      try {
+        const stat = fs.statSync(resolved);
+        if (!stat.isFile()) return;
+        if ((now - stat.mtimeMs) > CODEX_DISCOVERY_MTIME_GRACE_MS) return;
+        candidates.push({ filePath: resolved, mtimeMs: stat.mtimeMs });
+      } catch {
+        // ignore
+      }
+    },
+    (projectDir) => FileMonitor.watchProjectDir(projectDir, (filePath) =>
+      processFile(filePath, CodexParser, 'codex')
+    ),
+    { silent: true }
+  );
+
+  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return candidates.slice(0, CODEX_DISCOVERY_MAX_FILES).map(i => i.filePath);
+}
+
+function discoverRecentOpenClawFiles() {
+  return FileMonitor.getRecentOpenClawSessionFiles(OpenClawParser.OPENCLAW_AGENTS_DIR, {
+    maxAgeMs: OPENCLAW_DISCOVERY_MTIME_GRACE_MS,
+    maxCountPerAgent: OPENCLAW_DISCOVERY_MAX_FILES_PER_AGENT,
+    maxTotal: OPENCLAW_DISCOVERY_MAX_FILES
+  }).map(p => path.resolve(p));
+}
+
+function getRecentOpenClawLineActivityFiles(maxAgeMs) {
+  const now = Date.now();
+  const recent = new Set();
+
+  for (const [filePath, ts] of openclawLineActivityByFile.entries()) {
+    if (!Number.isFinite(ts)) {
+      openclawLineActivityByFile.delete(filePath);
+      continue;
+    }
+
+    const age = now - ts;
+    if (age <= maxAgeMs) {
+      recent.add(path.resolve(filePath));
+      continue;
+    }
+
+    // Keep map bounded; entries far beyond liveness horizon are not useful.
+    if (age > (maxAgeMs * 2)) {
+      openclawLineActivityByFile.delete(filePath);
+    }
+  }
+
+  return recent;
+}
+
+// Handle state changes
+function handleStateChange(sessionId, newState, options) {
+  if (options.removed) {
+    broadcast({
+      type: 'session_remove',
+      sessionId
+    });
+
+    if (UsageManager.removeLiveSession(sessionId)) {
+      broadcastUsageTotals();
+    }
+  } else {
+    broadcast({
+      type: 'state_change',
+      sessionId,
+      state: newState
+    });
+
+    if (UsageManager.setLiveSessionState(sessionId, newState)) {
+      broadcastUsageTotals();
+    }
+  }
+}
+
+// Check which sessions have their processes still running
+async function checkProcesses() {
+  const prevActive = activeProjectDirs;
+
+  // Claude Code: map PID -> project dir under `~/.claude/projects/<encoded-cwd>`.
+  const claudeProcesses = await ProcessMonitor.scanProcesses(
+    'claude',
+    ClaudeCodeParser.CLAUDE_PROJECTS_DIR,
+    ClaudeCodeParser.encodeCwd
+  );
+  const claudeActiveDirs = new Set(
+    Array.from(claudeProcesses.values()).map(p => p.projectDir).filter(safeIsDir)
+  );
+  const claudeActiveFilesFromLsof = new Set(
+    Array.from(claudeProcesses.values())
+      .flatMap(p => (p && Array.isArray(p.sessionFiles)) ? p.sessionFiles : [])
+      .map(p => path.resolve(p))
+  );
+  const claudeActiveFiles = new Set();
+  for (const dir of claudeActiveDirs) {
+    const dirAbs = path.resolve(dir);
+    const lsofInDir = Array.from(claudeActiveFilesFromLsof).filter(p => isUnderDir(p, dirAbs));
+    const recentInDir = FileMonitor.getRecentSessionFiles(dirAbs, {
+      maxAgeMs: CLAUDE_RECENT_MTIME_GRACE_MS,
+      maxCount: CLAUDE_RECENT_MAX_FILES_PER_DIR,
+      recursive: true
+    }).map(p => path.resolve(p));
+
+    const combined = new Set([...lsofInDir, ...recentInDir]);
+    if (combined.size === 0) {
+      // If we can't map to a file at all, still show something for the active dir.
+      const mostRecent = FileMonitor.getMostRecentSession(dirAbs, { recursive: true });
+      if (mostRecent) claudeActiveFiles.add(path.resolve(mostRecent));
+      continue;
+    }
+
+    // Keep the set small and biased toward newest files.
+    const ranked = Array.from(combined).map(p => {
+      try {
+        const stat = fs.statSync(p);
+        return { p, mtimeMs: stat.mtimeMs };
+      } catch {
+        return { p, mtimeMs: 0 };
+      }
+    });
+    ranked.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    ranked.slice(0, CLAUDE_RECENT_MAX_FILES_PER_DIR).forEach(({ p }) => claudeActiveFiles.add(p));
+  }
+
+  // Codex stores sessions under ~/.codex/sessions/YYYY/MM/DD, not per-CWD folders.
+  // Use sessions root as the process-mapping base and rely on lsof-open JSONL files.
+  const codexProcesses = await ProcessMonitor.scanProcesses(
+    'codex',
+    CodexParser.CODEX_SESSIONS_DIR,
+    () => ''
+  );
+  const codexOpenFiles = new Set(
+    Array.from(codexProcesses.values())
+      .flatMap(p => (p && Array.isArray(p.sessionFiles)) ? p.sessionFiles : [])
+      .map(p => path.resolve(p))
+  );
+  const recentCodexFiles = discoverRecentCodexFiles();
+  const codexDiscoveryFiles = new Set([
+    ...Array.from(codexOpenFiles),
+    ...recentCodexFiles
+  ]);
+  const codexActiveDirs = new Set(
+    Array.from(codexDiscoveryFiles).map(p => path.resolve(path.dirname(p))).filter(safeIsDir)
+  );
+
+  // OpenClaw: use `.jsonl.lock` markers to identify currently active sessions.
+  const openclawLocked = FileMonitor.findOpenClawLockedSessions(OpenClawParser.OPENCLAW_AGENTS_DIR);
+  const recentOpenClawDiscoveryFiles = discoverRecentOpenClawFiles();
+  const openclawDiscoveryFiles = new Set([
+    ...openclawLocked.sessionFiles.map(p => path.resolve(p)),
+    ...recentOpenClawDiscoveryFiles
+  ]);
+  const openclawActiveDirs = new Set([
+    ...Array.from(openclawLocked.activeDirs),
+    ...Array.from(openclawDiscoveryFiles).map(filePath => path.resolve(path.dirname(filePath)))
+  ].filter(safeIsDir));
+
+  const nextActive = new Set([...claudeActiveDirs, ...codexActiveDirs, ...openclawActiveDirs]);
+  activeProjectDirs = nextActive;
+
+  // Load sessions for newly discovered active dirs (this is what makes "all running sessions" show up
+  // even if the directory didn't exist when the server started).
+  const addedDirs = new Set();
+  for (const dir of nextActive) {
+    if (!prevActive.has(dir)) addedDirs.add(dir);
+  }
+
+  for (const dir of addedDirs) {
+    if (isUnderDir(dir, ClaudeCodeParser.CLAUDE_PROJECTS_DIR)) {
+      fileLogger.fileWatch('watching', dir, 'claude-code');
+      FileMonitor.watchProjectDir(dir, (filePath) => processFile(filePath, ClaudeCodeParser, 'claude-code'));
+      loadClaudeSessionsForProjectDir(dir, claudeActiveFiles);
+      continue;
+    }
+
+    if (isUnderDir(dir, OpenClawParser.OPENCLAW_AGENTS_DIR)) {
+      // This should be `.../agents/<agent>/sessions`
+      fileLogger.fileWatch('watching', dir, 'openclaw');
+      FileMonitor.watchProjectDir(dir, (filePath) => processFile(filePath, OpenClawParser, 'openclaw'));
+      loadOpenClawSessionsInDir(dir, openclawDiscoveryFiles);
+      continue;
+    }
+  }
+
+  processLogger.processCheck(claudeActiveDirs.size, codexActiveDirs.size, openclawActiveDirs.size);
+
+  // Ensure active Claude sessions are loaded periodically even when no watcher event is fired.
+  for (const filePath of claudeActiveFiles) {
+    processFile(filePath, ClaudeCodeParser, 'claude-code');
+  }
+
+  // Ensure active Codex sessions are loaded even when a new YYYY/MM/DD directory appears
+  // after startup (directory watchers are attached only to known day folders).
+  for (const filePath of codexDiscoveryFiles) {
+    processFile(filePath, CodexParser, 'codex');
+  }
+
+  // Also ensure currently active/recent OpenClaw sessions are loaded at least once (covers the case where
+  // a sessions dir was already known but no file-change event was observed by watchers).
+  for (const filePath of openclawDiscoveryFiles) {
+    processFile(filePath, OpenClawParser, 'openclaw');
+  }
+
+  const openclawLivenessFiles = new Set([
+    ...openclawLocked.sessionFiles.map(p => path.resolve(p)),
+    ...getRecentOpenClawLineActivityFiles(OPENCLAW_LIVENESS_RECENT_ACTIVITY_MS)
+  ]);
+
+  // Check all sessions against the combined active directories
+  SessionManager.checkSessionProcesses(nextActive, handleStateChange, {
+    // Strict OpenClaw liveness: lock or recently-observed incremental activity.
+    activeOpenClawFiles: openclawLivenessFiles,
+    activeClaudeFiles: claudeActiveFiles,
+    // Keep Codex liveness strict: only lsof-open files are treated as "has process".
+    // Recent-file discovery is for bootstrapping/updates, not for extending active lifetime.
+    activeCodexFiles: codexOpenFiles
+  });
+}
+
+// Start server
+server.listen(PORT, '0.0.0.0', async () => {
+  logger.serverStarted(PORT, 0);
+
+  // OA auto-start on startup (if not running)
+  const oaStatus = await getOaStatus();
+  if (oaStatus.running) {
+    logger.info('OA service detected running', { port: oaStatus.port, pid: oaStatus.pid, startedByNexus: oaStatus.startedByNexus });
+  } else {
+    try {
+      // Use the embedded oa-project under the repo by default
+      const defaultConfigPath = path.join(process.cwd(), 'oa-project', 'config.yaml');
+      if (fs.existsSync(defaultConfigPath)) {
+        const port = await findAvailablePort(OA_DEFAULT_PORT, OA_MAX_PORT_SCAN);
+        if (port) {
+          const oaArgs = ['serve', '--config', defaultConfigPath, '--port', String(port), '--no-open'];
+          const oaSpawn = spawn('oa', oaArgs, {
+            cwd: path.dirname(defaultConfigPath),
+            env: { ...process.env },
+            detached: false
+          });
+
+          saveOaPidFile(port, oaSpawn.pid);
+
+          oaSpawn.stdout?.on('data', (data) => {
+            logger.info(`OA stdout: ${data.toString().trim()}`);
+          });
+
+          oaSpawn.stderr?.on('data', (data) => {
+            logger.info(`OA stderr: ${data.toString().trim()}`);
+          });
+
+          oaSpawn.on('error', (err) => {
+            logger.error('OA process error', { error: err.message });
+            clearOaPidFile();
+          });
+
+          oaSpawn.on('close', (code) => {
+            logger.info('OA process closed', { code });
+            clearOaPidFile();
+          });
+
+          oaProcess = oaSpawn;
+          logger.info('OA service auto-started', { port, pid: oaSpawn.pid });
+        } else {
+          logger.warn('OA auto-start skipped: no available port found', { startPort: OA_DEFAULT_PORT, maxScan: OA_MAX_PORT_SCAN });
+        }
+      } else {
+        logger.warn('OA auto-start skipped: config.yaml not found', { defaultConfigPath });
+      }
+    } catch (error) {
+      logger.error('OA auto-start failed', { error: error?.message || String(error) });
+    }
+  }
+
+  await PricingService.initPricingService();
+
+  // Initialize WebSocket
+  initWebSocket(
+    server,
+    () => SessionManager.getAllSessions(),
+    () => getUsageTotals()
+  );
+
+  // Initialize external usage in background to avoid blocking startup.
+  ExternalUsageService.initExternalUsageService()
+    .then((changed) => {
+      if (changed) broadcastUsageTotals();
+    })
+    .catch(() => {});
+
+  // Step 1: Scan processes FIRST to get active project directories
+  await checkProcesses();
+  UsageManager.syncLiveSessions(SessionManager.getAllSessions());
+  broadcastUsageTotals();
+
+  const sessionCount = SessionManager.getAllSessions().length;
+  logger.info('Initial session load completed', { sessions: sessionCount });
+
+  // Step 2: Watch all project directories for new files
+  // Scan all Claude Code projects
+  FileMonitor.scanAllProjects(
+    ClaudeCodeParser.CLAUDE_PROJECTS_DIR,
+    () => {}, // Don't process files during scan
+    (projectDir) => FileMonitor.watchProjectDir(projectDir, (filePath) =>
+      processFile(filePath, ClaudeCodeParser, 'claude-code')
+    ),
+    { recursive: true }
+  );
+
+  // Scan Codex sessions
+  FileMonitor.scanCodexSessions(
+    CodexParser.CODEX_SESSIONS_DIR,
+    () => {}, // Don't process files during scan
+    (projectDir) => FileMonitor.watchProjectDir(projectDir, (filePath) =>
+      processFile(filePath, CodexParser, 'codex')
+    )
+  );
+
+  // Scan OpenClaw agents
+  FileMonitor.scanOpenClawAgents(
+    OpenClawParser.OPENCLAW_AGENTS_DIR,
+    () => {}, // Don't process files during scan
+    (projectDir) => FileMonitor.watchProjectDir(projectDir, (filePath) =>
+      processFile(filePath, OpenClawParser, 'openclaw')
+    )
+  );
+
+  // Build all-history usage totals in the background.
+  runUsageBackfill().catch((error) => {
+    logger.error('Usage backfill failed', { error: error?.message || String(error) });
+    UsageManager.setBackfillProgress({
+      status: 'done'
+    });
+    broadcastUsageTotals();
+  });
+
+  // Scan processes every 15 seconds
+  setInterval(checkProcesses, 15000);
+
+  // Check for IDLE sessions every 30 seconds
+  setInterval(() => {
+    SessionManager.checkIdleSessions(handleStateChange);
+  }, 30000);
+
+  // Refresh pricing cache in background (24h TTL enforced inside service).
+  setInterval(() => {
+    PricingService.refreshPricingInBackground().catch(() => {});
+  }, 60 * 60 * 1000);
+
+  // Keep Claude/Codex totals aligned with ccusage tools.
+  setInterval(() => {
+    ExternalUsageService.refreshExternalUsage()
+      .then((changed) => {
+        if (changed) broadcastUsageTotals();
+      })
+      .catch(() => {});
+  }, EXTERNAL_USAGE_REFRESH_INTERVAL_MS);
+});
+
+// Handle process termination gracefully
+process.on('SIGTERM', () => {
+  logger.info('Received SIGTERM, shutting down gracefully');
+  // Kill any running OpenClaw proxy processes
+  for (const [sessionId, process] of openclawProxyProcesses.entries()) {
+    try {
+      process.kill('SIGTERM');
+    } catch (error) {
+      logger.error('Failed to kill OpenClaw proxy process', { sessionId, error: error.message });
+    }
+  }
+  // Stop OA service if started by Nexus
+  stopOaProcess();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  logger.info('Received SIGINT, shutting down gracefully');
+  // Kill any running OpenClaw proxy processes
+  for (const [sessionId, process] of openclawProxyProcesses.entries()) {
+    try {
+      process.kill('SIGTERM');
+    } catch (error) {
+      logger.error('Failed to kill OpenClaw proxy process', { sessionId, error: error.message });
+    }
+  }
+  // Stop OA service if started by Nexus
+  stopOaProcess();
+  process.exit(0);
+});

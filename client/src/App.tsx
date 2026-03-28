@@ -1,0 +1,273 @@
+import { BrowserRouter as Router, Routes, Route, NavLink, useLocation } from 'react-router-dom';
+import './App.css';
+import { AgentsPanel } from './components/AgentsPanel';
+import { DenseSessionCard } from './components/DenseSessionCard';
+import { SessionCard } from './components/SessionCard';
+import { UsageBreakdownPanel } from './components/UsageBreakdownPanel';
+import CronManagerPage from './components/CronManagerPage';
+import CronJobDetail from './components/CronJobDetail';
+import CronJobEdit from './components/CronJobEdit';
+import OpenClawProxyPage from './components/OpenClawProxyPage';
+import OAPage from './components/OAPage';
+import { BitOfficeEmbed } from './components/BitOfficeEmbed';
+import './components/BitOfficeEmbed.css';
+import TokenBenchPage from './components/TokenBenchPage';
+import { useDisplayedSessions, type SessionSortMode } from './hooks/useDisplayedSessions';
+import { useSessionsStream } from './hooks/useSessionsStream';
+import { useSystemMetrics } from './hooks/useSystemMetrics';
+import { formatTokens, formatUsd } from './utils/formatters';
+import { useEffect, useState } from 'react';
+
+function AppContent() {
+  const { sessions, usageTotals, connectionStatus } = useSessionsStream();
+  const [sortMode, setSortMode] = useState<SessionSortMode>(() => {
+    const v = window.localStorage.getItem('nexus.sessionSort');
+    return v === 'activity' ? 'activity' : 'name';
+  });
+
+  const [pinnedAgents, setPinnedAgents] = useState<string[]>(() => {
+    try {
+      const raw = window.localStorage.getItem('nexus.pinnedAgents');
+      if (!raw) return ['jarvis', 'Paul_Operator'];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : ['jarvis', 'Paul_Operator'];
+    } catch {
+      return ['jarvis', 'Paul_Operator'];
+    }
+  });
+
+  const { visibleSessions } = useDisplayedSessions(sessions, sortMode, pinnedAgents);
+  const { metrics: systemMetrics } = useSystemMetrics();
+  const [viewMode, setViewMode] = useState<'normal' | 'dense'>('normal');
+  const costPrecision = usageTotals.totals.runningAgents > 0 ? 4 : 2;
+
+  const [oaStatus, setOaStatus] = useState<{ running: boolean; port?: number; url?: string } | null>(null);
+  const [oaLoading, setOaLoading] = useState(false);
+
+  const startOa = async () => {
+    if (oaLoading || oaStatus?.running) return;
+    setOaLoading(true);
+    try {
+      const res = await fetch('/api/oa/start', { method: 'POST' });
+      const data = await res.json();
+      if (data.running) {
+        setOaStatus(data);
+      }
+    } catch (err) {
+      console.error('Failed to start OA:', err);
+    } finally {
+      setOaLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch('/api/oa/status');
+        const data = await res.json();
+        if (!cancelled) setOaStatus(data);
+      } catch {
+        if (!cancelled) setOaStatus(null);
+      }
+    };
+
+    fetchStatus();
+    const id = window.setInterval(fetchStatus, 10_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  const location = useLocation();
+  const isEmbedPage = location.pathname === '/embed';
+  const isOaPage = location.pathname === '/oa';
+
+  return (
+    <div className="app">
+      {/* 顶部状态栏 */}
+      <header className="top-status-bar">
+        <div className="brand-block">
+          <span className="brand-mark">N</span>
+          <div className="brand-copy">
+            <h1>Nexus</h1>
+            <p>Agent cockpit</p>
+          </div>
+        </div>
+        <div className="status-metrics">
+          <div className="metric-box" onClick={() => setViewMode(v => v === 'normal' ? 'dense' : 'normal')} style={{ cursor: 'pointer' }}>
+            <span className="metric-label">MODE</span>
+            <strong className="metric-value">{viewMode}</strong>
+          </div>
+          <div
+            className="metric-box"
+            onClick={() => {
+              const next: SessionSortMode = sortMode === 'name' ? 'activity' : 'name';
+              setSortMode(next);
+              window.localStorage.setItem('nexus.sessionSort', next);
+            }}
+            style={{ cursor: 'pointer' }}
+            title={sortMode === 'activity' ? 'Sorting by most recently active session' : 'Stable sorting (agent/name first)'}
+          >
+            <span className="metric-label">SORT</span>
+            <strong className="metric-value">{sortMode}</strong>
+          </div>
+
+          <div
+            className="metric-box"
+            onClick={() => {
+              const current = pinnedAgents.join(',');
+              const input = window.prompt('Pin agents (comma-separated agentId). Example: jarvis,Paul_Operator', current);
+              if (input === null) return;
+              const next = input
+                .split(',')
+                .map(s => s.trim())
+                .filter(Boolean);
+              setPinnedAgents(next);
+              window.localStorage.setItem('nexus.pinnedAgents', JSON.stringify(next));
+            }}
+            style={{ cursor: 'pointer' }}
+            title="Pinned agents always stay on top"
+          >
+            <span className="metric-label">PIN</span>
+            <strong className="metric-value">{pinnedAgents.length}</strong>
+          </div>
+          <div className="metric-box">
+            <span className="metric-label">ACTIVE</span>
+            <strong className="metric-value">{visibleSessions.length}</strong>
+          </div>
+          <div className="metric-box">
+            <span className="metric-label">SOCKET</span>
+            <strong className={`metric-value ${connectionStatus === 'connected' ? 'value-success' : ''}`}>{connectionStatus}</strong>
+          </div>
+          <div className="metric-box">
+            <span className="metric-label">CPU</span>
+            <strong className="metric-value">{systemMetrics ? `${systemMetrics.cpu.percentage}%` : '...'}</strong>
+          </div>
+          <div className="metric-box">
+            <span className="metric-label">MEMORY</span>
+            <strong className="metric-value">{systemMetrics ? `${systemMetrics.memory.percentage}%` : '...'}</strong>
+          </div>
+          <div className="metric-box">
+            <span className="metric-label">TOKENS</span>
+            <strong className="metric-value">{formatTokens(usageTotals.totals.totalTokens)}</strong>
+          </div>
+          <div className="metric-box">
+            <span className="metric-label">COST</span>
+            <strong className="metric-value">{formatUsd(usageTotals.totals.totalCostUsd, costPrecision)}</strong>
+          </div>
+          <div className="metric-box" onClick={startOa} style={{ cursor: oaStatus?.running ? 'default' : 'pointer' }}>
+            <span className="metric-label">OA</span>
+            <strong className={`metric-value ${oaStatus?.running ? 'value-success' : ''}`}>
+              {oaLoading ? 'starting...' : (oaStatus ? (oaStatus.running ? `running:${oaStatus.port ?? ''}` : 'stopped') : '...')}
+            </strong>
+          </div>
+        </div>
+      </header>
+
+      {/* 左侧导航栏 */}
+      <aside className="side-nav">
+        <nav className="route-tabs" aria-label="Primary">
+          <NavLink to="/" end className={({ isActive }) => `route-tab ${isActive ? 'is-active' : ''}`}>
+            Sessions
+          </NavLink>
+          <NavLink to="/cron" className={({ isActive }) => `route-tab ${isActive ? 'is-active' : ''}`}>
+            Cron
+          </NavLink>
+          <NavLink to="/openclaw-proxy" className={({ isActive }) => `route-tab ${isActive ? 'is-active' : ''}`}>
+            OpenClaw Proxy
+          </NavLink>
+          <NavLink to="/oa" className={({ isActive }) => `route-tab ${isActive ? 'is-active' : ''}`}>
+            OA Dashboard
+          </NavLink>
+          <NavLink to="/embed" className={({ isActive }) => `route-tab ${isActive ? 'is-active' : ''}`}>
+            BIT Office
+          </NavLink>
+          <NavLink to="/tokenbench" className={({ isActive }) => `route-tab ${isActive ? 'is-active' : ''}`}>
+            TokenBench
+          </NavLink>
+        </nav>
+      </aside>
+
+      <main className={`page-content ${isEmbedPage || isOaPage ? 'page-content-full-width' : ''}`}>
+        <Routes>
+        <Route
+          path="/"
+          element={
+            <>
+              <UsageBreakdownPanel usageTotals={usageTotals} />
+
+              {viewMode === 'normal' ? (
+                <div className="sessions-grid">
+                  {visibleSessions.map((session) => (
+                    <SessionCard
+                      key={session.sessionId}
+                      session={session}
+                      pinnedAgents={pinnedAgents}
+                      onTogglePin={(agentId) => {
+                        const next = pinnedAgents.includes(agentId)
+                          ? pinnedAgents.filter((a) => a !== agentId)
+                          : [agentId, ...pinnedAgents];
+                        setPinnedAgents(next);
+                        window.localStorage.setItem('nexus.pinnedAgents', JSON.stringify(next));
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="sessions-grid-dense">
+                  {visibleSessions.map((session) => (
+                    <DenseSessionCard
+                      key={session.sessionId}
+                      session={session}
+                      showToolEvents={false}
+                      pinnedAgents={pinnedAgents}
+                      onTogglePin={(agentId) => {
+                        const next = pinnedAgents.includes(agentId)
+                          ? pinnedAgents.filter((a) => a !== agentId)
+                          : [agentId, ...pinnedAgents];
+                        setPinnedAgents(next);
+                        window.localStorage.setItem('nexus.pinnedAgents', JSON.stringify(next));
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {visibleSessions.length === 0 && connectionStatus === 'connected' && (
+                <div className="empty-state">
+                  <p>No active sessions</p>
+                  <p className="hint">Open a Claude Code, Codex, or OpenClaw session to see it here</p>
+                </div>
+              )}
+            </>
+          }
+        />
+        <Route path="/cron" element={<CronManagerPage />} />
+        <Route path="/cron/:jobId" element={<CronJobDetail />} />
+        <Route path="/cron/:jobId/edit" element={<CronJobEdit />} />
+        <Route path="/openclaw-proxy" element={<OpenClawProxyPage />} />
+        <Route path="/oa" element={<OAPage />} />
+        <Route path="/embed" element={<BitOfficeEmbed />} />
+        <Route path="/tokenbench" element={<TokenBenchPage />} />
+        </Routes>
+      </main>
+
+      {/* Right sidebar - Unified Agents Panel */}
+      {!isEmbedPage && !isOaPage && <AgentsPanel />}
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <Router>
+      <AppContent />
+    </Router>
+  );
+}
+
+export default App;
