@@ -11,6 +11,11 @@ const liveSessions = new Map();
 const usageDaily = new Map();
 const usageByModel = new Map();
 const usageDailyByModel = new Map();
+// Per-session throughput tracking.
+// lastCumulativeTotal: the aggregateTokens.totalTokens value at last throughput update
+// lastTokenAtMs: wall-clock ms at last update
+// tokensPerSecond: current rate (tok/s)
+const sessionThroughput = new Map();
 
 const DEFAULT_TOOLS = ['codex', 'claude-code', 'openclaw'];
 const RUNNING_STATES = new Set(['active', 'idle']);
@@ -475,6 +480,28 @@ export function ingestUsageEvent(rawParams) {
       tokensDelta,
       costDelta
     });
+
+    // Update per-session throughput tracking.
+    // `event.tokens.totalTokens` is the OpenClaw per-event cumulative token count.
+    // Use it directly as the per-event token delta (avoiding the aggregate sum).
+    // Use `event.timestampMs` for the time delta — stable across batch reads.
+    const MIN_THROUGHPUT_INTERVAL_MS = 500;
+    const now = Date.now();
+    const eventTimestampMs = toTimestampMs(event?.timestampMs) ?? now;
+    const eventTotalTokens = Number(event?.tokens?.totalTokens) || 0;
+    const prev = sessionThroughput.get(sessionId);
+    if (prev && prev.lastEventTimestampMs > 0) {
+      const timeDeltaMs = eventTimestampMs - prev.lastEventTimestampMs;
+      const tokensDeltaAbs = Math.max(eventTotalTokens - prev.lastEventTotalTokens, 0);
+      if (timeDeltaMs >= MIN_THROUGHPUT_INTERVAL_MS && tokensDeltaAbs > 0) {
+        const tps = tokensDeltaAbs / (timeDeltaMs / 1000);
+        sessionThroughput.set(sessionId, { lastEventTimestampMs: eventTimestampMs, lastWallclockMs: now, lastEventTotalTokens: eventTotalTokens, tokensPerSecond: tps });
+      } else {
+        sessionThroughput.set(sessionId, { lastEventTimestampMs: eventTimestampMs, lastWallclockMs: now, lastEventTotalTokens: eventTotalTokens, tokensPerSecond: prev.tokensPerSecond });
+      }
+    } else {
+      sessionThroughput.set(sessionId, { lastEventTimestampMs: eventTimestampMs, lastWallclockMs: now, lastEventTotalTokens: eventTotalTokens, tokensPerSecond: 0 });
+    }
   }
 
   if (
@@ -685,12 +712,34 @@ export function getCostHistoryMeta() {
   return CostHistoryStore.getCostHistoryMeta();
 }
 
+/**
+ * Get real-time throughput (tokens/sec) for a session.
+ * Returns null if the session has no throughput data yet.
+ */
+export function getSessionThroughput(sessionId) {
+  const entry = sessionThroughput.get(sessionId);
+  if (!entry) return null;
+  if (entry.tokensPerSecond === 0 && entry.lastEventTimestampMs === 0) return null;
+  return Math.round(entry.tokensPerSecond * 100) / 100; // round to 2 decimal places
+}
+
+/**
+ * Get aggregate token counts for a specific session.
+ * Returns { inputTokens, outputTokens, cachedInputTokens, totalTokens } or null.
+ */
+export function getSessionAggregateTokens(sessionId) {
+  const session = usageSessions.get(sessionId);
+  if (!session) return null;
+  return cloneTokens(session.aggregateTokens);
+}
+
 export function __resetForTests() {
   usageSessions.clear();
   liveSessions.clear();
   usageDaily.clear();
   usageByModel.clear();
   usageDailyByModel.clear();
+  sessionThroughput.clear();
   backfill = {
     status: 'done',
     scannedFiles: 0,

@@ -15,18 +15,8 @@ export function DenseSessionCard({ session, showToolEvents, pinnedAgents = [], o
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isEntering, setIsEntering] = useState(true);
 
-  // Debug logging for OpenClaw sessions
-  if (session.tool === 'openclaw') {
-    const shouldShowMeta = !!(session.agentId || session.model);
-    console.log('[DenseSessionCard DEBUG] OpenClaw session:', {
-      sessionId: session.sessionId?.substring(0, 8),
-      agentId: session.agentId,
-      model: session.model,
-      shouldShowMeta,
-      agentIdTruthy: !!session.agentId,
-      modelTruthy: !!session.model
-    });
-  }
+  // Throughput badge: only show when we have a real measured rate (not null/0)
+  const showThroughput = session.tokensPerSecond != null && session.tokensPerSecond > 0;
 
   useEffect(() => {
     const timer = window.setTimeout(() => setIsEntering(false), 400);
@@ -75,10 +65,15 @@ export function DenseSessionCard({ session, showToolEvents, pinnedAgents = [], o
             {pinnedAgents.includes(session.agentId) ? 'PINNED' : 'PIN'}
           </button>
         )}
-        {(session.agentId || session.model) && (
+        {(session.agentId || session.model || session.tokensPerSecond != null) && (
           <span className="dense-card-meta">
             {session.agentId && <span className="dense-card-meta-badge">{session.agentId}</span>}
             {session.model && <span className="dense-card-meta-badge">{session.model}</span>}
+            {showThroughput && (
+              <span className="dense-card-throughput">
+                {session.tokensPerSecond!.toFixed(1)} tok/s
+              </span>
+            )}
           </span>
         )}
       </div>

@@ -1451,6 +1451,7 @@ function processFile(filePath, parser, toolName) {
     sessionLogger.sessionDiscovered(sessionId, projectName, toolName, filePath);
 
     // Broadcast new session
+    const aggTokens = UsageManager.getSessionAggregateTokens(sessionId);
     broadcast({
       type: 'session_init',
       sessionId,
@@ -1459,7 +1460,12 @@ function processFile(filePath, parser, toolName) {
       agentId,
       model,
       messages: appended,
-      state: 'active'
+      state: 'active',
+      tokensPerSecond: UsageManager.getSessionThroughput(sessionId),
+      inputTokens: aggTokens?.inputTokens ?? null,
+      outputTokens: aggTokens?.outputTokens ?? null,
+      cachedInputTokens: aggTokens?.cachedInputTokens ?? null,
+      totalTokens: aggTokens?.totalTokens ?? null
     });
   } else {
     const session = existingSession;
@@ -1475,16 +1481,23 @@ function processFile(filePath, parser, toolName) {
     console.log(`[DEBUG] Session update ${sessionId}: agentId=${nextAgentId}, model=${nextModel}`);
 
     if (SessionManager.updateSessionMeta(sessionId, { model: nextModel, agentId: nextAgentId })) {
+      const aggTokens = UsageManager.getSessionAggregateTokens(sessionId);
       broadcast({
         type: 'session_update',
         sessionId,
         agentId: nextAgentId,
-        model: nextModel
+        model: nextModel,
+        tokensPerSecond: UsageManager.getSessionThroughput(sessionId),
+        inputTokens: aggTokens?.inputTokens ?? null,
+        outputTokens: aggTokens?.outputTokens ?? null,
+        cachedInputTokens: aggTokens?.cachedInputTokens ?? null,
+        totalTokens: aggTokens?.totalTokens ?? null
       });
     }
 
     if (parsedMessages.length > 0) {
       const appended = SessionManager.addMessages(sessionId, parsedMessages) || [];
+      const aggTokens = UsageManager.getSessionAggregateTokens(sessionId);
 
       if (appended.length > 0) {
         // Broadcast each new message
@@ -1492,7 +1505,12 @@ function processFile(filePath, parser, toolName) {
           broadcast({
             type: 'message_add',
             sessionId,
-            message
+            message,
+            tokensPerSecond: UsageManager.getSessionThroughput(sessionId),
+            inputTokens: aggTokens?.inputTokens ?? null,
+            outputTokens: aggTokens?.outputTokens ?? null,
+            cachedInputTokens: aggTokens?.cachedInputTokens ?? null,
+            totalTokens: aggTokens?.totalTokens ?? null
           });
         });
       }

@@ -43,14 +43,7 @@ export function useSessionsStream() {
           ...session,
           lastModified: Number(session.lastModified || Date.now())
         };
-        // Debug log for OpenClaw sessions
-        if (session.tool === 'openclaw') {
-          console.log('[FRONTEND DEBUG] OpenClaw session received:', {
-            sessionId: session.sessionId?.substring(0, 8),
-            agentId: session.agentId,
-            model: session.model
-          });
-        }
+
         newSessions.set(session.sessionId, sessionWithMeta);
       });
       setSessions(newSessions);
@@ -72,6 +65,11 @@ export function useSessionsStream() {
         name: message.name,
         agentId: message.agentId ?? null,
         model: message.model ?? null,
+        tokensPerSecond: message.tokensPerSecond ?? null,
+        inputTokens: message.inputTokens ?? null,
+        outputTokens: message.outputTokens ?? null,
+        cachedInputTokens: message.cachedInputTokens ?? null,
+        totalTokens: message.totalTokens ?? null,
         messages: message.messages,
         state: message.state || 'active',
         lastModified: Number(message.lastModified || Date.now())
@@ -101,6 +99,11 @@ export function useSessionsStream() {
         newSessions.set(sessionId, {
           ...session,
           messages: [...session.messages, incomingMessage],
+          tokensPerSecond: message.tokensPerSecond ?? session.tokensPerSecond ?? null,
+          inputTokens: message.inputTokens ?? session.inputTokens ?? null,
+          outputTokens: message.outputTokens ?? session.outputTokens ?? null,
+          cachedInputTokens: message.cachedInputTokens ?? session.cachedInputTokens ?? null,
+          totalTokens: message.totalTokens ?? session.totalTokens ?? null,
           lastModified: Date.now()
         });
         return newSessions;
@@ -139,6 +142,11 @@ export function useSessionsStream() {
           ...session,
           agentId: message.agentId ?? session.agentId ?? null,
           model: message.model ?? session.model ?? null,
+          tokensPerSecond: message.tokensPerSecond ?? session.tokensPerSecond ?? null,
+          inputTokens: message.inputTokens ?? session.inputTokens ?? null,
+          outputTokens: message.outputTokens ?? session.outputTokens ?? null,
+          cachedInputTokens: message.cachedInputTokens ?? session.cachedInputTokens ?? null,
+          totalTokens: message.totalTokens ?? session.totalTokens ?? null,
           lastModified: Date.now()
         };
 

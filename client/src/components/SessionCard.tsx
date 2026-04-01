@@ -45,28 +45,8 @@ export function SessionCard({ session, pinnedAgents = [], onTogglePin }: Session
   const [isEntering, setIsEntering] = useState(true);
   const [viewMode, setViewMode] = useState<MessageViewMode>('all');
 
-  // Debug logging for OpenClaw sessions
-  if (session.tool === 'openclaw') {
-    const shouldShowMeta = !!(session.agentId || session.model);
-    console.log('[SessionCard DEBUG] OpenClaw session:', {
-      sessionId: session.sessionId?.substring(0, 8),
-      agentId: session.agentId,
-      model: session.model,
-      agentIdType: typeof session.agentId,
-      modelType: typeof session.model,
-      shouldShowMeta,
-      agentIdTruthy: !!session.agentId,
-      modelTruthy: !!session.model
-    });
-  }
-
-  const shouldShowMeta = !!(session.agentId || session.model);
-  console.log('[SessionCard DEBUG] shouldShowMeta:', shouldShowMeta, 'for', session.sessionId?.substring(0, 8));
-
   // Helper to extract timestamp from OpenClaw message content
   const extractTimestampFromContent = (content: string): number | null => {
-    console.log('[extractTimestampFromContent] Input length:', content.length);
-
     // Try different timestamp patterns
     const patterns = [
       /"timestamp"[^"]*"([^"]+)"/,  // "timestamp": "Sun 2026-03-15 23:18 GMT+8"
@@ -77,28 +57,18 @@ export function SessionCard({ session, pinnedAgents = [], onTogglePin }: Session
       const match = content.match(pattern);
       if (match && match[1]) {
         const tsStr = match[1];
-        console.log('[extractTimestampFromContent] Found timestamp string:', tsStr);
-
-        // Try direct parse first
         let ts = Date.parse(tsStr);
-        console.log('[extractTimestampFromContent] Date.parse result:', ts);
-
         if (ts) return ts;
 
         // Try to parse "Sun 2026-03-15 23:18 GMT+8" format
         const dateMatch = tsStr.match(/(\w+)\s+(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
-        console.log('[extractTimestampFromContent] Regex match:', dateMatch);
-
         if (dateMatch) {
           const [, , year, month, day, hour, minute] = dateMatch;
-          console.log('[extractTimestampFromContent] Parsed:', { year, month, day, hour, minute });
           const parsed = new Date(`${year}-${month}-${day}T${hour}:${minute}:00`);
-          console.log('[extractTimestampFromContent] Final timestamp:', parsed.getTime());
           if (parsed.getTime()) return parsed.getTime();
         }
       }
     }
-    console.log('[extractTimestampFromContent] No timestamp found');
     return null;
   };
 
@@ -155,8 +125,6 @@ export function SessionCard({ session, pinnedAgents = [], onTogglePin }: Session
         const textResults: Array<{ role: string; content: string; timestampMs?: number }> = [];
         const toolEvents: typeof session.messages = [];
 
-        console.log('[OpenClaw Processing] Starting with', session.messages.length, 'messages');
-
         for (const message of session.messages) {
           const kind = getMessageKind(message.content);
 
@@ -167,27 +135,21 @@ export function SessionCard({ session, pinnedAgents = [], onTogglePin }: Session
           }
 
           const cleanText = extractCleanText(message.content);
-          if (!cleanText) {
-            console.log('[OpenClaw Processing] Skipped empty message');
-            continue;
-          }
+          if (!cleanText) continue;
 
           // Extract timestamp from message or content
           let ts = message.timestampMs;
           if (!ts) {
             ts = extractTimestampFromContent(message.content) || undefined;
           }
-          console.log('[OpenClaw Processing] Message timestamp:', ts, 'from role:', message.role);
 
           // Deduplicate by clean text - keep the one with latest timestamp
           const existing = seen.get(cleanText);
           if (existing) {
             if (ts && (!existing.timestampMs || ts > existing.timestampMs)) {
-              console.log('[OpenClaw Processing] Updating timestamp for duplicate message');
               seen.set(cleanText, { text: cleanText, timestampMs: ts });
             }
           } else {
-            console.log('[OpenClaw Processing] Adding new message with timestamp:', ts);
             seen.set(cleanText, { text: cleanText, timestampMs: ts });
           }
         }
@@ -209,10 +171,7 @@ export function SessionCard({ session, pinnedAgents = [], onTogglePin }: Session
         }
 
         // Combine text messages and tool events, preserving original order
-        const result = [...textResults, ...toolEvents];
-        console.log('[OpenClaw Processing] Final result:', result.length, 'messages (', textResults.length, 'text +', toolEvents.length, 'tool events)');
-
-        return result;
+        return [...textResults, ...toolEvents];
       })()
     : session.messages;
 
@@ -272,21 +231,16 @@ export function SessionCard({ session, pinnedAgents = [], onTogglePin }: Session
     <div
       className={cardClass}
       style={{
-        borderColor: session.state === 'active' ? toolConfig.borderColor : undefined
-      }}
+        borderColor: session.state === 'active' ? toolConfig.borderColor : undefined,
+        '--tool-color': toolConfig.color
+      } as React.CSSProperties}
     >
-      {/* Header - always shown */}
+      {/* Header Row 1 — identity + controls */}
       <div className="session-header">
         <span className="session-tool" style={{ color: toolConfig.color }}>
           {toolConfig.label}
         </span>
         <span className="session-name">{session.name}</span>
-        {(session.agentId || session.model) && (
-          <span className="session-meta">
-            {session.agentId && <span className="session-meta-badge">{session.agentId}</span>}
-            {session.model && <span className="session-meta-badge">{session.model}</span>}
-          </span>
-        )}
         <span className={`session-state state-${session.state}`}>{session.state.toUpperCase()}</span>
         {session.agentId && (
           <button
@@ -313,6 +267,34 @@ export function SessionCard({ session, pinnedAgents = [], onTogglePin }: Session
         </button>
       </div>
 
+      {/* Header Row 2 — agent info + token stats */}
+      {(session.agentId || session.model || session.totalTokens != null || session.tokensPerSecond != null) && (
+        <div className="session-token-row">
+          {session.agentId && <span className="session-meta-badge">{session.agentId}</span>}
+          {session.model && <span className="session-meta-badge">{session.model}</span>}
+          {session.inputTokens != null && (
+            <span className="session-token-chip session-token-input">
+              ↓ {session.inputTokens.toLocaleString()}
+            </span>
+          )}
+          {session.outputTokens != null && (
+            <span className="session-token-chip session-token-output">
+              ↑ {session.outputTokens.toLocaleString()}
+            </span>
+          )}
+          {session.cachedInputTokens != null && session.cachedInputTokens > 0 && (
+            <span className="session-token-chip session-token-cached">
+              ⚡ {session.cachedInputTokens.toLocaleString()}
+            </span>
+          )}
+          {session.tokensPerSecond != null && session.tokensPerSecond > 0 && (
+            <span className="session-token-chip session-token-throughput">
+              {session.tokensPerSecond.toFixed(1)} tok/s
+            </span>
+          )}
+        </div>
+      )}
+
       <div
         className="messages"
         ref={messagesContainerRef}
@@ -336,17 +318,6 @@ export function SessionCard({ session, pinnedAgents = [], onTogglePin }: Session
         {visibleMessages.map((message, idx) => {
           const timeStr = formatTime(message.timestampMs);
           const isTextMessage = getMessageKind(message.content) === 'text';
-
-          // Debug: log OpenClaw message structure
-          if (session.tool === 'openclaw' && idx < 3) {
-            console.log('[OpenClaw Message]', {
-              idx,
-              role: message.role,
-              hasTimestamp: !!message.timestampMs,
-              timeStr,
-              contentPreview: message.content.substring(0, 80)
-            });
-          }
 
           return (
             <div key={idx} className={`message message-${message.role}`}>

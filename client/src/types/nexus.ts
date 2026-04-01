@@ -27,6 +27,13 @@ export interface Session {
   agentId?: string | null;
   /** Most recently observed model for the session (best-effort). */
   model?: string | null;
+  /** Real-time tokens/sec throughput (null until second token event observed). */
+  tokensPerSecond?: number | null;
+  /** Cumulative token counts for this session. */
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cachedInputTokens?: number | null;
+  totalTokens?: number | null;
   messages: Message[];
   state: 'active' | 'idle' | 'cooling' | 'gone';
   lastModified: number;
@@ -87,6 +94,11 @@ export interface ServerMessage {
   name?: string;
   agentId?: string | null;
   model?: string | null;
+  tokensPerSecond?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cachedInputTokens?: number | null;
+  totalTokens?: number | null;
   state?: Session['state'];
   lastModified?: number;
   message?: Message;
