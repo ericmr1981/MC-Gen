@@ -124,3 +124,20 @@ goals:
     unit: count
     healthy: 1
     warning: 0
+
+- id: wdg_health
+  name: WDG Health
+  builtin: false
+  metrics:
+  - name: success_rate
+    unit: '%'
+    healthy: 99
+    warning: 95
+  - name: error_rate
+    unit: '%'
+    healthy: 0
+    warning: 5
+  - name: p95_latency_ms
+    unit: ms
+    healthy: 800
+    warning: 2500
