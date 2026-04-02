@@ -9,6 +9,7 @@ import CronJobDetail from './components/CronJobDetail';
 import CronJobEdit from './components/CronJobEdit';
 import OpenClawProxyPage from './components/OpenClawProxyPage';
 import OAPage from './components/OAPage';
+import WDGHealthPage from './components/WDGHealthPage';
 import { BitOfficeEmbed } from './components/BitOfficeEmbed';
 import './components/BitOfficeEmbed.css';
 import TokenBenchPage from './components/TokenBenchPage';
@@ -85,6 +86,7 @@ function AppContent() {
   const location = useLocation();
   const isEmbedPage = location.pathname === '/embed';
   const isOaPage = location.pathname === '/oa';
+  const isWdgHealthPage = location.pathname === '/wdg-health';
 
   return (
     <div className="app">
@@ -183,6 +185,9 @@ function AppContent() {
           <NavLink to="/oa" className={({ isActive }) => `route-tab ${isActive ? 'is-active' : ''}`}>
             OA Dashboard
           </NavLink>
+          <NavLink to="/wdg-health" className={({ isActive }) => `route-tab ${isActive ? 'is-active' : ''}`}>
+            WDG Health
+          </NavLink>
           <NavLink to="/embed" className={({ isActive }) => `route-tab ${isActive ? 'is-active' : ''}`}>
             BIT Office
           </NavLink>
@@ -192,7 +197,7 @@ function AppContent() {
         </nav>
       </aside>
 
-      <main className={`page-content ${isEmbedPage || isOaPage ? 'page-content-full-width' : ''}`}>
+      <main className={`page-content ${isEmbedPage || isOaPage || isWdgHealthPage ? 'page-content-full-width' : ''}`}>
         <Routes>
         <Route
           path="/"
@@ -251,6 +256,7 @@ function AppContent() {
         <Route path="/cron/:jobId/edit" element={<CronJobEdit />} />
         <Route path="/openclaw-proxy" element={<OpenClawProxyPage />} />
         <Route path="/oa" element={<OAPage />} />
+        <Route path="/wdg-health" element={<WDGHealthPage />} />
         <Route path="/embed" element={<BitOfficeEmbed />} />
         <Route path="/tokenbench" element={<TokenBenchPage />} />
         </Routes>

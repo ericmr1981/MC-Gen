@@ -652,6 +652,90 @@ app.get('/api/oa/logs', (req, res) => {
   });
 });
 
+// GET /api/wdg-health — WDG Health dashboard data from monitor.db
+// Returns latest run, 7d/30d trends, and recent failures from breakdown JSON
+app.get('/api/wdg-health', async (req, res) => {
+  try {
+    const { execSync: execSyncImport } = await import('child_process');
+    const dbPath = path.join(process.cwd(), 'oa-project', 'data', 'monitor.db');
+
+    const rowsRaw = execSyncImport(
+      `sqlite3 "${dbPath}" "SELECT date, goal, metric, value, unit, breakdown FROM goal_metrics WHERE goal = 'wdg_health' ORDER BY date DESC" -json`,
+      { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 }
+    );
+    const rows = JSON.parse(rowsRaw || '[]');
+
+    const metricNames = ['success_rate', 'error_rate', 'p95_latency_ms'];
+    const latest = {};
+    const trends = { '7d': {}, '30d': {} };
+    const failures = [];
+    const cutoff7d = new Date(); cutoff7d.setDate(cutoff7d.getDate() - 7);
+    const cutoff30d = new Date(); cutoff30d.setDate(cutoff30d.getDate() - 30);
+
+    for (const m of metricNames) {
+      latest[m] = null;
+      trends['7d'][m] = [];
+      trends['30d'][m] = [];
+    }
+
+    const seen = new Set();
+    for (const row of rows) {
+      const m = row.metric;
+      if (!metricNames.includes(m)) continue;
+
+      if (!latest[m]) {
+        latest[m] = { date: row.date, value: row.value, unit: row.unit, breakdown: row.breakdown || null };
+      }
+
+      const dateKey = `${m}::${row.date}`;
+      if (!seen.has(dateKey)) {
+        seen.add(dateKey);
+        const d = new Date(`${row.date}T00:00:00`);
+        if (d >= cutoff30d) trends['30d'][m].push({ date: row.date, value: row.value });
+        if (d >= cutoff7d) trends['7d'][m].push({ date: row.date, value: row.value });
+      }
+
+      if (row.breakdown) {
+        try {
+          const bd = JSON.parse(row.breakdown);
+          const fails = (bd.checks || []).filter((c) => c.status === 'fail');
+          for (const f of fails) {
+            failures.push({ date: row.date, ts: bd.ts, check: f.name, status: f.status, http: f.http, latency_ms: f.latency_ms, detail: f.detail });
+          }
+        } catch (_) {}
+      }
+    }
+
+    for (const m of metricNames) {
+      trends['7d'][m].sort((a, b) => a.date.localeCompare(b.date));
+      trends['30d'][m].sort((a, b) => a.date.localeCompare(b.date));
+    }
+    failures.sort((a, b) => b.date.localeCompare(a.date));
+
+    const latestBdRaw = latest['success_rate']?.breakdown || latest['error_rate']?.breakdown;
+    const latestBd = latestBdRaw ? JSON.parse(latestBdRaw) : null;
+    const overall = latestBd?.overall || 'unknown';
+
+    res.json({
+      latest: {
+        date: latest['success_rate']?.date || null,
+        overall,
+        success_rate: latest['success_rate']?.value ?? null,
+        error_rate: latest['error_rate']?.value ?? null,
+        p95_latency_ms: latest['p95_latency_ms']?.value ?? null,
+        unit: latest['success_rate']?.unit || '%',
+        total_checks: latestBd?.summary?.total ?? null,
+        passed_checks: latestBd?.summary?.passed ?? null,
+        failed_checks: latestBd?.summary?.failed ?? null,
+      },
+      trends,
+      failures: failures.slice(0, 50),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error?.message || String(error) });
+  }
+});
+
 // Get all agents grouped by category with collapsible sections
 app.get('/api/agents', (req, res) => {
   try {

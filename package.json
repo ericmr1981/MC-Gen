@@ -28,6 +28,7 @@
     "test:unit": "node tests/unit/server.test.js && node tests/unit/edge-cases.test.js",
     "test:integration": "node tests/integration/websocket.test.js",
     "test:all": "npm run test:unit && npm run test:integration && npm run test:codex && npm run test:usage-parsers && npm run test:usage-manager && npm run test:pricing-stability",
+    "build": "cd client && npm run build",
     "test": "node tests/verify-phase1.js"
   },
   "dependencies": {
