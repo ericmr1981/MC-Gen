@@ -1,0 +1,6 @@
+{
+  "initCommand": "bash init.sh",
+  "testCommand": "",
+  "e2eCommand": "",
+  "acceptanceSummary": "TODO"
+}

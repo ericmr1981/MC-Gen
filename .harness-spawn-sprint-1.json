@@ -1,0 +1,36 @@
+{
+  "sprintId": "sprint-1",
+  "task": "开始开发 WDG Health 模块（类似 Cron Reliability）：每天 4:00 运行 WDG healthcheck，将结果写入 OA monitor.db，并在 MC-Gen 的 OA Dashboard UI 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。",
+  "role": "design-ui-designer",
+  "agent": {
+    "id": "design-ui-designer",
+    "confidence": 70,
+    "category": "design",
+    "file": "skills/agency-agents-lib/agents/design/design-ui-designer.md"
+  },
+  "attachments": [
+    "harness/context/context-package-2026-04-01T16-22-35.md",
+    "skills/dev-project-harness-loop/SKILL.md",
+    "skills/subagent-coding-lite/SKILL.md",
+    "skills/subagent-coding-lite/TEMPLATE_BRIEF.md",
+    "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/harness/contracts/sprint-1.md",
+    "skills/agency-agents-lib/agents/design/design-ui-designer.md"
+  ],
+  "contextPackagePath": "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/harness/context/context-package-2026-04-01T16-22-35.md",
+  "attachmentTier": "full",
+  "masterBriefPath": "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/harness/assignments/master-brief-1775060556086.md",
+  "sprintContractPath": "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/harness/contracts/sprint-1.md",
+  "dependsOn": [],
+  "matrixFlags": [
+    {
+      "flag": "COMPLEXITY_HIGH",
+      "note": "complexity=9 — PGE-sprint enforced"
+    },
+    {
+      "flag": "COMPLEXITY_MED",
+      "note": "complexity=9 — consider multi-sprint"
+    }
+  ],
+  "sessionId": "session_1775060556087_sprint-1",
+  "dispatchTime": "2026-04-01T16:22:36.087Z"
+}
