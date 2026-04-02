@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiUrl } from '../utils/api-base';
 import { useParams, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import type { ScheduledTask, TaskExecutionHistory } from '../types/scheduled-tasks';
@@ -29,7 +30,7 @@ const ScheduledTaskDetail: React.FC<ScheduledTaskDetailProps> = ({ taskId: propT
         setLoading(true);
 
         // Fetch task details
-        const taskResponse = await fetch(`/api/scheduled-tasks/${effectiveTaskId}`);
+        const taskResponse = await fetch(apiUrl(`/scheduled-tasks/${effectiveTaskId}`));
         if (!taskResponse.ok) {
           throw new Error(`Failed to fetch task: ${taskResponse.status} ${taskResponse.statusText}`);
         }
@@ -37,7 +38,7 @@ const ScheduledTaskDetail: React.FC<ScheduledTaskDetailProps> = ({ taskId: propT
         setTask(taskData.task);
 
         // Fetch execution history
-        const historyResponse = await fetch(`/api/scheduled-tasks/${effectiveTaskId}/history`);
+        const historyResponse = await fetch(apiUrl(`/scheduled-tasks/${effectiveTaskId}/history`));
         if (!historyResponse.ok) {
           throw new Error(`Failed to fetch history: ${historyResponse.status} ${historyResponse.statusText}`);
         }
@@ -59,7 +60,7 @@ const ScheduledTaskDetail: React.FC<ScheduledTaskDetailProps> = ({ taskId: propT
     if (!task) return;
 
     try {
-      const response = await fetch(`/api/scheduled-tasks/${task.id}/state`, {
+      const response = await fetch(apiUrl(`/scheduled-tasks/${task.id}/state`), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -94,7 +95,7 @@ const ScheduledTaskDetail: React.FC<ScheduledTaskDetailProps> = ({ taskId: propT
     }
 
     try {
-      const response = await fetch(`/api/scheduled-tasks/${task.id}`, {
+      const response = await fetch(apiUrl(`/scheduled-tasks/${task.id}`), {
         method: 'DELETE',
       });
 

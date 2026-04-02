@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiUrl } from '../utils/api-base';
 import { format, addDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, getDay, parseISO } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { Link } from 'react-router-dom';
@@ -38,7 +39,7 @@ const CalendarView: React.FC = () => {
           ? format(endOfMonth(currentDate), "yyyy-MM-dd'T'HH:mm:ss")
           : format(endOfWeek(currentDate, { weekStartsOn: 1 }), "yyyy-MM-dd'T'HH:mm:ss");
 
-        const response = await fetch('/api/scheduled-tasks/calendar-range', {
+        const response = await fetch(apiUrl('/scheduled-tasks/calendar-range'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

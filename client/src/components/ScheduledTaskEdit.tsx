@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiUrl } from '../utils/api-base';
 import { useParams, useNavigate } from 'react-router-dom';
 import type { ScheduledTask } from '../types/scheduled-tasks';
 
@@ -27,7 +28,7 @@ const ScheduledTaskEdit: React.FC<ScheduledTaskEditProps> = ({ taskId: propTaskI
     const fetchTask = async () => {
       try {
         setLoading(true);
-        const response = await fetch(`/api/scheduled-tasks/${effectiveTaskId}`);
+        const response = await fetch(apiUrl(`/scheduled-tasks/${effectiveTaskId}`));
 
         if (!response.ok) {
           throw new Error(`Failed to fetch task: ${response.status} ${response.statusText}`);
@@ -80,7 +81,7 @@ const ScheduledTaskEdit: React.FC<ScheduledTaskEditProps> = ({ taskId: propTaskI
     e.preventDefault();
 
     try {
-      const response = await fetch(`/api/scheduled-tasks/${effectiveTaskId}`, {
+      const response = await fetch(apiUrl(`/scheduled-tasks/${effectiveTaskId}`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

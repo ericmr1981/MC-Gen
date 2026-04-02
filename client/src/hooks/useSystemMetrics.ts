@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiUrl } from '../utils/api-base';
 
 interface SystemMetrics {
   cpu: {
@@ -24,7 +25,7 @@ export function useSystemMetrics() {
   useEffect(() => {
     const fetchMetrics = async () => {
       try {
-        const response = await fetch('/api/system/metrics');
+        const response = await fetch(apiUrl('/system/metrics'));
         if (!response.ok) {
           throw new Error('Failed to fetch system metrics');
         }

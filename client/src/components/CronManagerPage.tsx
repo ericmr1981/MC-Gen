@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { apiUrl } from '../utils/api-base';
 import { useNavigate } from 'react-router-dom';
 import type { ScheduledTask } from '../types/scheduled-tasks';
 
@@ -33,7 +34,7 @@ export default function CronManagerPage() {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch('/api/scheduled-tasks');
+      const res = await fetch(apiUrl('/scheduled-tasks'));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setTasks(Array.isArray(data.tasks) ? data.tasks : []);
@@ -82,7 +83,7 @@ export default function CronManagerPage() {
   }, [tasks, selectedAgentId, query]);
 
   const patchEnabled = async (jobId: string, enabled: boolean) => {
-    const res = await fetch(`/api/scheduled-tasks/${jobId}/state`, {
+    const res = await fetch(apiUrl(`/scheduled-tasks/${jobId}/state`), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled })

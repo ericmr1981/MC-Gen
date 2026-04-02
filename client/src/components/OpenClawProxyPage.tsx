@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../utils/api-base';
 import { useSessionsStream } from '../hooks/useSessionsStream';
 
 interface OpenClawLogEntry {
@@ -263,7 +264,7 @@ const OpenClawProxyPage: React.FC = () => {
     try {
       if (isRecording) {
         // Stop recording
-        const response = await fetch('/api/openclaw-proxy/stop', {
+        const response = await fetch(apiUrl('/openclaw-proxy/stop'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionId: selectedAgent }),
@@ -279,7 +280,7 @@ const OpenClawProxyPage: React.FC = () => {
         }
       } else {
         // Start recording
-        const response = await fetch('/api/openclaw-proxy/start', {
+        const response = await fetch(apiUrl('/openclaw-proxy/start'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -313,7 +314,7 @@ const OpenClawProxyPage: React.FC = () => {
 
     const loadLogs = async () => {
       try {
-        const response = await fetch(`/api/openclaw-proxy/logs?path=${encodeURIComponent(logFilePath)}`);
+        const response = await fetch(apiUrl(`/openclaw-proxy/logs?path=${encodeURIComponent(logFilePath)}`));
         if (response.ok) {
           const result = await response.json();
           if (result.logs) {
@@ -338,7 +339,7 @@ const OpenClawProxyPage: React.FC = () => {
   useEffect(() => {
     const checkRecordingStatus = async () => {
       try {
-        const response = await fetch('/api/openclaw-proxy/status');
+        const response = await fetch(apiUrl('/openclaw-proxy/status'));
         if (response.ok) {
           const data = await response.json();
           if (data.activeProxies && data.activeProxies.length > 0) {

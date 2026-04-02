@@ -18,6 +18,7 @@ import { useSessionsStream } from './hooks/useSessionsStream';
 import { useSystemMetrics } from './hooks/useSystemMetrics';
 import { formatTokens, formatUsd } from './utils/formatters';
 import { useEffect, useState } from 'react';
+import { apiUrl } from './utils/api-base';
 
 function AppContent() {
   const { sessions, usageTotals, connectionStatus } = useSessionsStream();
@@ -49,7 +50,7 @@ function AppContent() {
     if (oaLoading || oaStatus?.running) return;
     setOaLoading(true);
     try {
-      const res = await fetch('/api/oa/start', { method: 'POST' });
+      const res = await fetch(apiUrl('/oa/start'), { method: 'POST' });
       const data = await res.json();
       if (data.running) {
         setOaStatus(data);
@@ -66,7 +67,7 @@ function AppContent() {
 
     const fetchStatus = async () => {
       try {
-        const res = await fetch('/api/oa/status');
+        const res = await fetch(apiUrl('/oa/status'));
         const data = await res.json();
         if (!cancelled) setOaStatus(data);
       } catch {
@@ -269,8 +270,9 @@ function AppContent() {
 }
 
 function App() {
+  const basename = window.location.pathname.startsWith('/nexus') ? '/nexus' : undefined;
   return (
-    <Router>
+    <Router basename={basename}>
       <AppContent />
     </Router>
   );

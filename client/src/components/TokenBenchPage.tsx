@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { apiUrl } from '../utils/api-base';
 import type {
   TokenBenchOutlier,
   TokenBenchProject,
@@ -114,7 +115,7 @@ export default function TokenBenchPage() {
     setProjectsLoading(true);
     setProjectsError(null);
 
-    fetch('/api/tokenbench/projects')
+    fetch(apiUrl('/tokenbench/projects'))
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return;
@@ -146,7 +147,7 @@ export default function TokenBenchPage() {
     setSaveOk(null);
 
     try {
-      const res = await fetch('/api/tokenbench/taskcards/compute', {
+      const res = await fetch(apiUrl('/tokenbench/taskcards/compute'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -181,7 +182,7 @@ export default function TokenBenchPage() {
     setSaveOk(null);
 
     try {
-      const res = await fetch('/api/tokenbench/taskcards', {
+      const res = await fetch(apiUrl('/tokenbench/taskcards'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ card: preview })
@@ -202,7 +203,7 @@ export default function TokenBenchPage() {
     setReportError(null);
 
     try {
-      const res = await fetch('/api/tokenbench/report');
+      const res = await fetch(apiUrl('/tokenbench/report'));
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'report_failed');
       setReportRows(Array.isArray(data?.rows) ? data.rows : []);
@@ -221,7 +222,7 @@ export default function TokenBenchPage() {
     setTasksError(null);
 
     try {
-      const res = await fetch('/api/tokenbench/taskcards');
+      const res = await fetch(apiUrl('/tokenbench/taskcards'));
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'tasks_failed');
       const items = Array.isArray(data?.items) ? data.items : [];

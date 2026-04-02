@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiUrl } from '../utils/api-base';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { ScheduledTask, TaskExecutionHistory } from '../types/scheduled-tasks';
 
@@ -32,12 +33,12 @@ export default function CronJobDetail() {
         setLoading(true);
         setError(null);
 
-        const r1 = await fetch(`/api/scheduled-tasks/${jobId}`);
+        const r1 = await fetch(apiUrl(`/scheduled-tasks/${jobId}`));
         if (!r1.ok) throw new Error(`Failed to fetch job (HTTP ${r1.status})`);
         const d1 = await r1.json();
         setTask(d1.task);
 
-        const r2 = await fetch(`/api/scheduled-tasks/${jobId}/history?limit=20`);
+        const r2 = await fetch(apiUrl(`/scheduled-tasks/${jobId}/history?limit=20`));
         if (r2.ok) {
           const d2 = await r2.json();
           setHistory(Array.isArray(d2.history) ? d2.history : []);
@@ -56,7 +57,7 @@ export default function CronJobDetail() {
 
   const patchEnabled = async (enabled: boolean) => {
     if (!task) return;
-    const res = await fetch(`/api/scheduled-tasks/${task.id}/state`, {
+    const res = await fetch(apiUrl(`/scheduled-tasks/${task.id}/state`), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled })

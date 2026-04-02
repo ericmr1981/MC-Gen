@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { apiUrl } from '../utils/api-base';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { ScheduledTask } from '../types/scheduled-tasks';
 
@@ -58,7 +59,7 @@ export default function CronJobEdit() {
       try {
         setLoading(true);
         setError(null);
-        const res = await fetch(`/api/scheduled-tasks/${jobId}`);
+        const res = await fetch(apiUrl(`/scheduled-tasks/${jobId}`));
         if (!res.ok) throw new Error(`Failed to fetch job (HTTP ${res.status})`);
         const data = await res.json();
         const t: ScheduledTask = data.task;
@@ -131,7 +132,7 @@ export default function CronJobEdit() {
         delivery,
       };
 
-      const res = await fetch(`/api/scheduled-tasks/${task.id}`, {
+      const res = await fetch(apiUrl(`/scheduled-tasks/${task.id}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated)
@@ -154,7 +155,7 @@ export default function CronJobEdit() {
     if (!window.confirm(`Delete cron job "${task.name}"? This removes it from jobs.json.`)) return;
 
     try {
-      const res = await fetch(`/api/scheduled-tasks/${task.id}`, { method: 'DELETE' });
+      const res = await fetch(apiUrl(`/scheduled-tasks/${task.id}`), { method: 'DELETE' });
       if (!res.ok) {
         const txt = await res.text().catch(() => '');
         throw new Error(`Delete failed (HTTP ${res.status}) ${txt}`);

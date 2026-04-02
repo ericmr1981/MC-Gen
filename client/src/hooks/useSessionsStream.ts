@@ -201,8 +201,9 @@ export function useSessionsStream() {
         reconnectTimerRef.current = null;
       }
 
+      // Connect via /nexus/ws (Home Portal sub-route) for unified auth gate
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}`;
+      const wsUrl = `${protocol}//${window.location.host}/nexus/ws`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 

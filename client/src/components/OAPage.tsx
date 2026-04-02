@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../utils/api-base';
 
 interface OAStatus {
   running: boolean;
@@ -18,7 +19,7 @@ const OAPage: React.FC = () => {
 
   const fetchStatus = async () => {
     try {
-      const response = await fetch('/api/oa/status');
+      const response = await fetch(apiUrl('/oa/status'));
       if (response.ok) {
         const data = await response.json();
         setStatus(data);

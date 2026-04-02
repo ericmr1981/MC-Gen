@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../utils/api-base';
 
 interface CheckFailure {
   date: string;
@@ -160,7 +161,7 @@ const WDGHealthPage: React.FC = () => {
   const [trendWindow, setTrendWindow] = useState<'7d' | '30d'>('7d');
 
   useEffect(() => {
-    fetch('/api/wdg-health')
+    fetch(apiUrl('/wdg-health'))
       .then((r) => r.json())
       .then((d) => {
         if (d.error) { setError(d.error); }

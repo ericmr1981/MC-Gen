@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiUrl } from '../utils/api-base';
 import './AgentsPanel.css';
 
 export interface AgentStatus {
@@ -34,7 +35,7 @@ export function AgentsPanel() {
 
   const fetchAgents = async () => {
     try {
-      const response = await fetch('/api/agents');
+      const response = await fetch(apiUrl('/agents'));
       const result = await response.json();
       setData(result);
 
