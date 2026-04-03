@@ -4,7 +4,7 @@
     "repoPath": "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen",
     "source": "default"
   },
-  "taskDescription": "开始开发 WDG Health 模块（类似 Cron Reliability）：每天 4:00 运行 WDG healthcheck，将结果写入 OA monitor.db，并在 MC-Gen 的 OA Dashboard UI 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。",
+  "taskDescription": "--mode llm --complexity 5 MC-Gen sprint-2: 在本地(Mac mini)配置每天04:00运行 scripts/wdg_healthcheck.py，将结果写入 OA monitor.db，并端到端验证：monitor.db写入成功、/api/wdg-health 返回真实数据。",
   "llmResult": {
     "taskProfile": {
       "taskType": "multi",
@@ -15,7 +15,7 @@
       "riskLevel": "medium",
       "scopeGuess": "multi-file"
     },
-    "enhancedBrief": "代码库: Node.js/TypeScript / Express。主要文件: server/index.js, server/usage/external-usage-service.js, server/usage/usage-manager.js, client/src/components/TokenBenchPage.tsx, server/tokenbench.js。",
+    "enhancedBrief": "代码库: Node.js/TypeScript / Express。主要文件: server/index.js, server/usage/external-usage-service.js, server/usage/usage-manager.js, client/src/components/TokenBenchPage.tsx, server/tokenbench.js。请基于实际文件结构工作，不要假设。",
     "needsClarification": false,
     "clarificationQuestions": [],
     "isMultiAgent": false,
@@ -25,104 +25,35 @@
     "sprints": [
       {
         "sprintId": "sprint-1",
-        "role": "design-ui-designer",
-        "scope": "开始开发 WDG Health 模块（类似 Cron Reliability）：每天 4:00 运行 WDG healthcheck，将结果写入 OA monitor.db，并在 MC-Gen 的 OA Dashboard UI 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。",
+        "role": "engineering-backend-architect",
+        "scope": "--mode llm --complexity 5 MC-Gen sprint-2: 在本地(Mac mini)配置每天04:00运行 scripts/wdg_healthcheck.py，将结果写入 OA monitor.db，并端到端验证：monitor.db写入成功、/api/wdg-health 返回真实数据。",
         "dependsOn": [],
-        "brief": "# Sprint Contract — sprint-1\n\n## 任务\n开始开发 WDG Health 模块（类似 Cron Reliability）：每天 4:00 运行 WDG healthcheck，将结果写入 OA monitor.db，并在 MC-Gen 的 OA Dashboard UI 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。\n\n## 项目\nworkspace | /Users/ericmr/Documents/GitHub/Nexus/MC-Gen\n\n## Agent\ndesign-ui-designer\n\n## Matrix Flags\n- **[COMPLEXITY_HIGH]** complexity=9 — PGE-sprint enforced\n- **[COMPLEXITY_MED]** complexity=9 — consider multi-sprint\n## Continue Gate (v5 preview)\n- **Final Oracle**: Live acceptance for \"开始开发 WDG Health 模块（类似 Cron Reliability）：每天 4:00 运行 WDG healthcheck，将结果写入 OA monitor.db，并在 MC-Gen 的 OA Dashboard UI 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。\" plus local oracle: npm run build && node tests/verify-phase1.js\n- **Current Blocker**: Not yet verified against final oracle. Replace with concrete blocker after the first failed live check.\n- **Round Outcome**: retry_with_new_bet\n- **Stop Allowed**: no\n- **Next Forced Bet**: Execute one bounded bet, then run npm run build && node tests/verify-phase1.js; if final oracle still fails, record evidence delta and launch the next repair step.\n- **Local Oracle**: npm run build && node tests/verify-phase1.js\n- **Evidence Delta**: new-branch\n- **No-Evidence Rounds**: 0\n- **Last Evidence**: none yet\n- **Pivot Trigger**: 2 no-evidence rounds on same branch\n\n\n## 依赖\n_无_\n\n## 验收\n```bash\ncd \"/Users/ericmr/Documents/GitHub/Nexus/MC-Gen\" && npm run build && node tests/verify-phase1.js\n```\n\n## 注意事项\n代码库: Node.js/TypeScript / Express。主要文件: server/index.js, server/usage/external-usage-service.js, server/usage/usage-manager.js, client/src/components/TokenBenchPage.tsx, server/tokenbench.js。\n\n---\n*Generated: 2026-04-01T16:22:36.086Z*",
+        "brief": "# Sprint Contract — sprint-1\n\n## 任务\n--mode llm --complexity 5 MC-Gen sprint-2: 在本地(Mac mini)配置每天04:00运行 scripts/wdg_healthcheck.py，将结果写入 OA monitor.db，并端到端验证：monitor.db写入成功、/api/wdg-health 返回真实数据。\n\n## 项目\nworkspace | /Users/ericmr/Documents/GitHub/Nexus/MC-Gen\n\n## Agent\nengineering-backend-architect\n## Matrix Flags（本 sprint 决策标记）\n- **[SPEC_API]** scope includes API — validate routes/contracts\n\n## 依赖\n_无（第一个 sprint）_\n\n## 验收\n```bash\ncd \"/Users/ericmr/Documents/GitHub/Nexus/MC-Gen\" && cd client && npm run build && bash scripts/run_change_guard.sh\n```\n\n## 注意事项（来自 LLM 分析）\n代码库: Node.js/TypeScript / Express。主要文件: server/index.js, server/usage/external-usage-service.js, server/usage/usage-manager.js, client/src/components/TokenBenchPage.tsx, server/tokenbench.js。请基于实际文件结构工作，不要假设。\n\n---\n*Generated: 2026-04-02T13:47:27.361Z*",
         "agent": {
-          "id": "design-ui-designer",
-          "confidence": 70,
-          "category": "design",
-          "file": "skills/agency-agents-lib/agents/design/design-ui-designer.md"
+          "id": "engineering-backend-architect",
+          "confidence": 80,
+          "category": "engineering",
+          "file": "skills/agency-agents-lib/agents/engineering/engineering-backend-architect.md"
         },
-        "attachmentTier": "full"
+        "matrixFlags": [
+          {
+            "flag": "SCOPE_MULTI",
+            "note": "scope=multi-file — affects 20 files, confirm with Boss"
+          },
+          {
+            "flag": "SPEC_API",
+            "note": "scope includes API — validate routes/contracts"
+          }
+        ]
       }
     ],
-    "masterBrief": "# Architectural Brief — workspace\n> harness.js v5-preview | 2026-04-01T16:22:36.086Z\n> Mode: llm-full | Complexity: 9/10 | Profile: PGE-sprint\n\n## 任务画像\n- **类型**: multi\n- **复杂度**: 9/10 → PGE-sprint\n- **风险**: medium\n- **范围**: multi-file\n- **Agent**: design-ui-designer (confidence: 70%)\n\n## Matrix Flags\n- **[COMPLEXITY_HIGH]** complexity=9 — PGE-sprint enforced\n- **[COMPLEXITY_MED]** complexity=9 — consider multi-sprint\n\n## Continue Gate (v5 preview)\n- **Final Oracle**: Live acceptance for \"开始开发 WDG Health 模块（类似 Cron Reliability）：每天 4:00 运行 WDG healthcheck，将结果写入 OA monitor.db，并在 MC-Gen 的 OA Dashboard UI 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。\" plus local oracle: npm run build && node tests/verify-phase1.js\n- **Current Blocker**: Not yet verified against final oracle. Replace with concrete blocker after the first failed live check.\n- **Round Outcome**: retry_with_new_bet\n- **Stop Allowed**: no\n- **Next Forced Bet**: Execute one bounded bet, then run npm run build && node tests/verify-phase1.js; if final oracle still fails, record evidence delta and launch the next repair step.\n- **Local Oracle**: npm run build && node tests/verify-phase1.js\n- **Evidence Delta**: new-branch\n- **Last Evidence**: none yet\n- **Pivot Trigger**: 2 no-evidence rounds on same branch\n\n\n## 架构要点\n代码库: Node.js/TypeScript / Express。主要文件: server/index.js, server/usage/external-usage-service.js, server/usage/usage-manager.js, client/src/components/TokenBenchPage.tsx, server/tokenbench.js。\n\n## 代码库\n- **类型**: Node.js/TypeScript | **框架**: Express\n- **构建**: `npm run build` | **测试**: `node tests/verify-phase1.js` | **Guard**: `unknown`\n- **Local Oracle**: `npm run build && node tests/verify-phase1.js`\n\n## 主要文件\n- `server/index.js` (1977L)\n- `server/usage/external-usage-service.js` (1213L)\n- `server/usage/usage-manager.js` (750L)\n- `client/src/components/TokenBenchPage.tsx` (537L)\n- `server/tokenbench.js` (492L)\n- `server/monitors/file-monitor.js` (479L)\n- `server/usage/pricing-service.js` (465L)\n- `tests/unit/edge-cases.test.js` (428L)\n- `client/src/components/UsageBreakdownPanel.tsx` (410L)\n- `client/src/components/SessionCard.tsx` (404L)\n",
+    "masterBrief": "# Architectural Brief — workspace\n> harness.js v3 | 2026-04-02T13:47:27.362Z\n> LLM-analyzed\n\n## 任务画像（LLM 生成）\n- **类型**: multi\n- **技能**: 见下方 agent 建议\n- **复杂度**: 3/5\n- **风险**: medium\n- **范围**: multi-file\n## Matrix Flags（矩阵驱动的决策标记）\n- **[SCOPE_MULTI]** scope=multi-file — affects 20 files, confirm with Boss\n\n\n## 架构要点（LLM 推理）\n代码库: Node.js/TypeScript / Express。主要文件: server/index.js, server/usage/external-usage-service.js, server/usage/usage-manager.js, client/src/components/TokenBenchPage.tsx, server/tokenbench.js。请基于实际文件结构工作，不要假设。\n\n## 代码库真相\n- **类型**: Node.js/TypeScript | **框架**: Express\n- **构建**: `cd client && npm run build` | **测试**: `node tests/verify-phase1.js` | **Guard**: `bash scripts/run_change_guard.sh`\n\n## 主要文件\n- `server/index.js` (2061L)\n- `server/usage/external-usage-service.js` (1213L)\n- `server/usage/usage-manager.js` (750L)\n- `client/src/components/TokenBenchPage.tsx` (538L)\n- `server/tokenbench.js` (492L)\n- `server/monitors/file-monitor.js` (479L)\n- `server/usage/pricing-service.js` (465L)\n- `tests/unit/edge-cases.test.js` (428L)\n- `client/src/components/UsageBreakdownPanel.tsx` (410L)\n- `client/src/components/SessionCard.tsx` (404L)\n\n## 禁止\nnode_modules/, .git/, dist/, build/, __pycache__/, *.pyc\n",
     "matrixFlags": [
       {
-        "flag": "COMPLEXITY_HIGH",
-        "note": "complexity=9 — PGE-sprint enforced"
-      },
-      {
-        "flag": "COMPLEXITY_MED",
-        "note": "complexity=9 — consider multi-sprint"
+        "flag": "SCOPE_MULTI",
+        "note": "scope=multi-file — affects 20 files, confirm with Boss"
       }
-    ],
-    "attachmentTier": "full",
-    "continueGate": {
-      "branchKey": "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen::开始开发 wdg health 模块（类似 cron reliability）：每天 4:00 运行 wdg healthcheck，将结果写入 oa monitor.db，并在 mc-gen 的 oa dashboard ui 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。",
-      "evidenceFingerprint": "{\"task\":\"开始开发 wdg health 模块（类似 cron reliability）：每天 4:00 运行 wdg healthcheck，将结果写入 oa monitor.db，并在 mc-gen 的 oa dashboard ui 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。\",\"complexity\":9,\"taskType\":\"multi\",\"riskLevel\":\"medium\",\"scopeGuess\":\"multi-file\",\"buildCmd\":\"npm run build\",\"guardCmd\":\"unknown\",\"localOracle\":\"npm run build && node tests/verify-phase1.js\",\"topFiles\":[\"server/index.js\",\"server/usage/external-usage-service.js\",\"server/usage/usage-manager.js\",\"client/src/components/TokenBenchPage.tsx\",\"server/tokenbench.js\"]}",
-      "finalOracle": "Live acceptance for \"开始开发 WDG Health 模块（类似 Cron Reliability）：每天 4:00 运行 WDG healthcheck，将结果写入 OA monitor.db，并在 MC-Gen 的 OA Dashboard UI 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。\" plus local oracle: npm run build && node tests/verify-phase1.js",
-      "currentBlocker": "Not yet verified against final oracle. Replace with concrete blocker after the first failed live check.",
-      "roundOutcome": "retry_with_new_bet",
-      "stopAllowed": "no",
-      "nextForcedBet": "Execute one bounded bet, then run npm run build && node tests/verify-phase1.js; if final oracle still fails, record evidence delta and launch the next repair step.",
-      "evidenceDelta": "new-branch",
-      "noEvidenceRounds": 0,
-      "pivotAfterNoEvidenceRounds": 2,
-      "localOracle": "npm run build && node tests/verify-phase1.js",
-      "evidenceArtifact": "",
-      "resultStatus": "",
-      "failureType": "",
-      "lastEvidence": "",
-      "resultConsumedAt": "",
-      "explicitInputsApplied": false
-    },
-    "executionResult": {
-      "status": "",
-      "failureType": "",
-      "actualDurationMin": null,
-      "retryCount": null,
-      "whatWasDone": "",
-      "whatWasNotDone": "",
-      "verificationEvidence": "",
-      "consumedAt": "",
-      "consumedFrom": ""
-    }
+    ]
   },
-  "complexity": 9,
-  "tokenTrack": {
-    "mode": "llm-full",
-    "llmCalls": 1,
-    "estimatedTokens": 2660,
-    "subagentEstimate": 4
-  },
-  "continueGate": {
-    "branchKey": "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen::开始开发 wdg health 模块（类似 cron reliability）：每天 4:00 运行 wdg healthcheck，将结果写入 oa monitor.db，并在 mc-gen 的 oa dashboard ui 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。",
-    "evidenceFingerprint": "{\"task\":\"开始开发 wdg health 模块（类似 cron reliability）：每天 4:00 运行 wdg healthcheck，将结果写入 oa monitor.db，并在 mc-gen 的 oa dashboard ui 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。\",\"complexity\":9,\"taskType\":\"multi\",\"riskLevel\":\"medium\",\"scopeGuess\":\"multi-file\",\"buildCmd\":\"npm run build\",\"guardCmd\":\"unknown\",\"localOracle\":\"npm run build && node tests/verify-phase1.js\",\"topFiles\":[\"server/index.js\",\"server/usage/external-usage-service.js\",\"server/usage/usage-manager.js\",\"client/src/components/TokenBenchPage.tsx\",\"server/tokenbench.js\"]}",
-    "finalOracle": "Live acceptance for \"开始开发 WDG Health 模块（类似 Cron Reliability）：每天 4:00 运行 WDG healthcheck，将结果写入 OA monitor.db，并在 MC-Gen 的 OA Dashboard UI 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。\" plus local oracle: npm run build && node tests/verify-phase1.js",
-    "currentBlocker": "Not yet verified against final oracle. Replace with concrete blocker after the first failed live check.",
-    "roundOutcome": "retry_with_new_bet",
-    "stopAllowed": "no",
-    "nextForcedBet": "Execute one bounded bet, then run npm run build && node tests/verify-phase1.js; if final oracle still fails, record evidence delta and launch the next repair step.",
-    "evidenceDelta": "new-branch",
-    "noEvidenceRounds": 0,
-    "pivotAfterNoEvidenceRounds": 2,
-    "localOracle": "npm run build && node tests/verify-phase1.js",
-    "evidenceArtifact": "",
-    "resultStatus": "",
-    "failureType": "",
-    "lastEvidence": "",
-    "resultConsumedAt": "",
-    "explicitInputsApplied": false
-  },
-  "executionResult": {
-    "status": "",
-    "failureType": "",
-    "actualDurationMin": null,
-    "retryCount": null,
-    "whatWasDone": "",
-    "whatWasNotDone": "",
-    "verificationEvidence": "",
-    "consumedAt": "",
-    "consumedFrom": ""
-  },
-  "dispatchTime": "2026-04-01T16:22:36.087Z",
-  "lifecycle": {
-    "mode": "dispatch",
-    "consumedResult": false,
-    "goalClosed": false
-  },
-  "version": "harness.js v5-preview"
+  "dispatchTime": "2026-04-02T13:47:27.363Z"
 }

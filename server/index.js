@@ -27,14 +27,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 7878;
+const PORT = Number(process.env.PORT) || 7878;
 
 // Middleware to parse JSON bodies
 app.use(express.json());
 
 // Enable CORS for all routes to allow frontend communication
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:7878'], // Vite dev server and production
+  origin: ['http://localhost:5173', 'http://localhost:7878', 'http://localhost:7979'], // Vite dev server and production
   credentials: true
 }));
 
@@ -665,7 +665,13 @@ app.get('/api/wdg-health', async (req, res) => {
     );
     const rows = JSON.parse(rowsRaw || '[]');
 
-    const metricNames = ['success_rate', 'error_rate', 'p95_latency_ms'];
+    const metricNames = [
+      'success_rate', 'error_rate', 'p95_latency_ms',
+      // VPS healthcheck metrics
+      'vps_cpu_usage', 'vps_ram_usage', 'vps_disk_usage',
+      'vps_docker_containers', 'vps_nginx_up',
+      'vps_net_latency_gw', 'vps_net_latency_ext', 'vps_load_avg',
+    ];
     const latest = {};
     const trends = { '7d': {}, '30d': {} };
     const failures = [];
@@ -731,6 +737,52 @@ app.get('/api/wdg-health', async (req, res) => {
       trends,
       failures: failures.slice(0, 50),
     });
+  } catch (error) {
+    res.status(500).json({ error: error?.message || String(error) });
+  }
+});
+
+// POST /api/wdg-health-put — 接收 VPS healthcheck push 数据，写入 monitor.db
+// Body: { node, timestamp, checks: [{metric, value, unit}] }
+app.post('/api/wdg-health-put', async (req, res) => {
+  try {
+    const { execSync } = await import('child_process');
+    const dbPath = path.join(process.cwd(), 'oa-project', 'data', 'monitor.db');
+
+    // Bearer token 认证
+    const authHeader = req.headers['authorization'] || '';
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    const expectedToken = process.env.WDG_HEALTH_API_TOKEN || 'wdg_health_secret_2026';
+    if (token !== expectedToken) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { node = 'vps-1', timestamp, checks = [] } = req.body || {};
+    if (!timestamp || !Array.isArray(checks) || checks.length === 0) {
+      return res.status(400).json({ error: 'Invalid payload: need {node, timestamp, checks[]}' });
+    }
+
+    // date 取 timestamp 的日期部分（UTC）
+    const dateStr = timestamp.slice(0, 10);  // YYYY-MM-DD
+
+    // 写入每条 check 到 goal_metrics
+    const values = checks.map(c => {
+      const metric = `vps_${c.metric}`;
+      const value = c.value;
+      const unit = c.unit || '';
+      // breakdown 存完整 JSON
+      const breakdown = JSON.stringify({ node, ts: timestamp, ...c });
+      return `SELECT datetime('now'), '${dateStr}', 'wdg_health', '${metric.replace(/'/g, "''")}', ${value}, '${unit.replace(/'/g, "''")}', '${breakdown.replace(/'/g, "''")}'`;
+    }).join('\n  UNION ALL\n  ');
+
+    const sql = `
+      INSERT OR REPLACE INTO goal_metrics (created_at, date, goal, metric, value, unit, breakdown)
+      ${values}
+    `;
+
+    execSync(`sqlite3 "${dbPath}" "${sql.replace(/"/g, '\\"')}"`, { encoding: 'utf-8', timeout: 10000 });
+
+    res.json({ ok: true, node, timestamp, count: checks.length });
   } catch (error) {
     res.status(500).json({ error: error?.message || String(error) });
   }
@@ -1305,6 +1357,8 @@ app.put('/api/scheduled-tasks/:jobId', (req, res) => {
 
 // Serve static files from dist directory
 app.use(express.static(path.join(__dirname, '..', 'dist')));
+// Build uses base "/nexus" so we also serve dist under that prefix
+app.use('/nexus', express.static(path.join(__dirname, '..', 'dist')));
 
 // Catch-all route to serve index.html for client-side routing
 // This ensures React Router handles all frontend routes

@@ -1,0 +1,40 @@
+# ============================================================
+# ZeroClaw — WDG Health Agent（VPS）
+# ============================================================
+
+# ---- MiniMax OpenAI 兼容端点 ----
+[providers.minimax]
+kind = "openai"
+base_url = "https://api.minimaxi.com/anthropic/v1"
+api_key = "sk-cp-LisQf6eQ-63IWLi0aYpdnG7pcZM3uJqkDOKD6mWzcfqALW3sS6_0l1AS4An_NjwvJPQ8T2T-UaVZVDfL-asFiH00W3Kymg6VZ_j5FSWySBPDRc-gfE0hGqo"
+model = "MiniMax-M2.7"
+max_tokens = 4096
+timeout_secs = 60
+
+default_provider = "minimax"
+default_model = "MiniMax-M2.7"
+default_temperature = 0.3
+
+# ---- 安全 ----
+[gateway]
+require_pairing = true
+allow_public_bind = false
+port = 42617
+
+# ---- 工具 ----
+[tools]
+enabled_tools = ["shell", "file_read", "file_write"]
+
+# ---- 日志 ----
+[logging]
+level = "info"
+file = "/root/wdg_health/zeroclaw.log"
+
+# ---- 自治 ----
+[autonomy]
+level = "supervised"
+
+# ---- 工作目录 ----
+[workspace]
+dir = "/root/zeroclaw-workspace"
+max_disk_mb = 100

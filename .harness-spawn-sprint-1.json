@@ -1,36 +1,39 @@
 {
   "sprintId": "sprint-1",
-  "task": "开始开发 WDG Health 模块（类似 Cron Reliability）：每天 4:00 运行 WDG healthcheck，将结果写入 OA monitor.db，并在 MC-Gen 的 OA Dashboard UI 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。",
-  "role": "design-ui-designer",
+  "task": "--mode llm --complexity 5 MC-Gen sprint-2: 在本地(Mac mini)配置每天04:00运行 scripts/wdg_healthcheck.py，将结果写入 OA monitor.db，并端到端验证：monitor.db写入成功、/api/wdg-health 返回真实数据。",
+  "role": "engineering-backend-architect",
   "agent": {
-    "id": "design-ui-designer",
-    "confidence": 70,
-    "category": "design",
-    "file": "skills/agency-agents-lib/agents/design/design-ui-designer.md"
+    "id": "engineering-backend-architect",
+    "confidence": 80,
+    "category": "engineering",
+    "file": "skills/agency-agents-lib/agents/engineering/engineering-backend-architect.md"
   },
   "attachments": [
-    "harness/context/context-package-2026-04-01T16-22-35.md",
     "skills/dev-project-harness-loop/SKILL.md",
     "skills/subagent-coding-lite/SKILL.md",
-    "skills/subagent-coding-lite/TEMPLATE_BRIEF.md",
-    "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/harness/contracts/sprint-1.md",
-    "skills/agency-agents-lib/agents/design/design-ui-designer.md"
+    "skills/subagent-coding-lite/TEMPLATE_ASSIGNMENT.md",
+    "skills/subagent-coding-lite/TEMPLATE_HANDOFF.md",
+    "skills/agency-agents-lib/agents/engineering/engineering-backend-architect.md",
+    "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/harness/assignments/master-brief-1775137647362.md",
+    "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/harness/contracts/sprint-1.md"
   ],
-  "contextPackagePath": "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/harness/context/context-package-2026-04-01T16-22-35.md",
-  "attachmentTier": "full",
-  "masterBriefPath": "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/harness/assignments/master-brief-1775060556086.md",
+  "masterBriefPath": "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/harness/assignments/master-brief-1775137647362.md",
   "sprintContractPath": "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/harness/contracts/sprint-1.md",
   "dependsOn": [],
   "matrixFlags": [
     {
-      "flag": "COMPLEXITY_HIGH",
-      "note": "complexity=9 — PGE-sprint enforced"
+      "flag": "SCOPE_MULTI",
+      "note": "scope=multi-file — affects 20 files, confirm with Boss"
     },
     {
-      "flag": "COMPLEXITY_MED",
-      "note": "complexity=9 — consider multi-sprint"
+      "flag": "SCOPE_MULTI",
+      "note": "scope=multi-file — affects 20 files, confirm with Boss"
+    },
+    {
+      "flag": "SPEC_API",
+      "note": "scope includes API — validate routes/contracts"
     }
   ],
-  "sessionId": "session_1775060556087_sprint-1",
-  "dispatchTime": "2026-04-01T16:22:36.087Z"
+  "sessionId": "session_1775137647363_sprint-1",
+  "dispatchTime": "2026-04-02T13:47:27.363Z"
 }

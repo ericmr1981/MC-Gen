@@ -1,0 +1,21 @@
+[Unit]
+Description=ZeroClaw WDG Health Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/zeroclaw daemon start
+Restart=always
+RestartSec=10
+EnvironmentFile=/root/zeroclaw-vps/env.sh
+WorkingDirectory=/root/zeroclaw-vps
+User=root
+
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/root/wdg_health /root/zeroclaw-workspace /root/zeroclaw-vps
+
+[Install]
+WantedBy=multi-user.target
