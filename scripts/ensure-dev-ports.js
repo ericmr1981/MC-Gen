@@ -1,5 +1,13 @@
 import { execSync } from 'child_process';
+import fs from 'fs';
 import path from 'path';
+
+const LSOF = (() => {
+  // On macOS, lsof commonly lives in /usr/sbin which may not be on PATH.
+  if (process.env.LSOF_PATH) return process.env.LSOF_PATH;
+  if (fs.existsSync('/usr/sbin/lsof')) return '/usr/sbin/lsof';
+  return 'lsof';
+})();
 
 function run(command) {
   try {
@@ -10,7 +18,7 @@ function run(command) {
 }
 
 function listListeningPids(port) {
-  const out = run(`lsof -nP -iTCP:${port} -sTCP:LISTEN -t`);
+  const out = run(`${LSOF} -nP -iTCP:${port} -sTCP:LISTEN -t`);
   if (!out) return [];
   return out.split('\n').map(s => s.trim()).filter(Boolean);
 }
@@ -20,7 +28,7 @@ function getCommand(pid) {
 }
 
 function getProcessCwd(pid) {
-  const out = run(`lsof -a -p ${pid} -d cwd -Fn`);
+  const out = run(`${LSOF} -a -p ${pid} -d cwd -Fn`);
   if (!out) return '';
   const line = out.split('\n').find(s => s.startsWith('n'));
   return line ? line.slice(1).trim() : '';

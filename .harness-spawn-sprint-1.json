@@ -1,39 +1,32 @@
 {
   "sprintId": "sprint-1",
-  "task": "--mode llm --complexity 5 MC-Gen sprint-2: 在本地(Mac mini)配置每天04:00运行 scripts/wdg_healthcheck.py，将结果写入 OA monitor.db，并端到端验证：monitor.db写入成功、/api/wdg-health 返回真实数据。",
-  "role": "engineering-backend-architect",
+  "task": "MC-Gen: 修复 OA dashboard 总是挂掉（假 running / iframe 连接失败），并修复右上角 OA 按钮无效（点击后无可用 dashboard 或状态不准）",
+  "role": "engineering-senior-developer",
   "agent": {
-    "id": "engineering-backend-architect",
-    "confidence": 80,
+    "id": "engineering-senior-developer",
+    "confidence": 70,
     "category": "engineering",
-    "file": "skills/agency-agents-lib/agents/engineering/engineering-backend-architect.md"
+    "file": "skills/agency-agents-lib/agents/engineering/engineering-senior-developer.md"
   },
   "attachments": [
+    "harness/context/context-package-2026-04-06T05-19-46.md",
     "skills/dev-project-harness-loop/SKILL.md",
     "skills/subagent-coding-lite/SKILL.md",
-    "skills/subagent-coding-lite/TEMPLATE_ASSIGNMENT.md",
-    "skills/subagent-coding-lite/TEMPLATE_HANDOFF.md",
-    "skills/agency-agents-lib/agents/engineering/engineering-backend-architect.md",
-    "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/harness/assignments/master-brief-1775137647362.md",
-    "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/harness/contracts/sprint-1.md"
+    "skills/subagent-coding-lite/TEMPLATE_BRIEF.md",
+    "/Users/ericmr/Documents/GitHub/MC-Gen/harness/contracts/sprint-1.md",
+    "skills/agency-agents-lib/agents/engineering/engineering-senior-developer.md"
   ],
-  "masterBriefPath": "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/harness/assignments/master-brief-1775137647362.md",
-  "sprintContractPath": "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/harness/contracts/sprint-1.md",
+  "contextPackagePath": "/Users/ericmr/Documents/GitHub/MC-Gen/harness/context/context-package-2026-04-06T05-19-46.md",
+  "attachmentTier": "full",
+  "masterBriefPath": "/Users/ericmr/Documents/GitHub/MC-Gen/harness/assignments/master-brief-1775452787921.md",
+  "sprintContractPath": "/Users/ericmr/Documents/GitHub/MC-Gen/harness/contracts/sprint-1.md",
   "dependsOn": [],
   "matrixFlags": [
     {
-      "flag": "SCOPE_MULTI",
-      "note": "scope=multi-file — affects 20 files, confirm with Boss"
-    },
-    {
-      "flag": "SCOPE_MULTI",
-      "note": "scope=multi-file — affects 20 files, confirm with Boss"
-    },
-    {
-      "flag": "SPEC_API",
-      "note": "scope includes API — validate routes/contracts"
+      "flag": "COMPLEXITY_MED",
+      "note": "complexity=5 — consider multi-sprint"
     }
   ],
-  "sessionId": "session_1775137647363_sprint-1",
-  "dispatchTime": "2026-04-02T13:47:27.363Z"
+  "sessionId": "session_1775452787922_sprint-1",
+  "dispatchTime": "2026-04-06T05:19:47.922Z"
 }

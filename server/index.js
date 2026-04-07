@@ -139,6 +139,33 @@ const OA_MAX_PORT_SCAN = 10;
 const OA_RUNTIME_DIR = path.join(process.cwd(), '.nexus-runtime');
 const OA_PID_FILE = path.join(OA_RUNTIME_DIR, 'oa.json');
 
+// Keep a small tail of OA output for debugging (shown via /api/oa/logs)
+let oaLastOutput = {
+  stdout: [],
+  stderr: [],
+  updatedAt: null
+};
+
+function pushRing(buffer, line, max = 200) {
+  buffer.push(line);
+  if (buffer.length > max) buffer.splice(0, buffer.length - max);
+}
+
+function attachOaLogCapture(proc) {
+  const onData = (key) => (data) => {
+    const raw = data.toString();
+    oaLastOutput.updatedAt = new Date().toISOString();
+    for (const line of raw.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      pushRing(oaLastOutput[key], trimmed);
+    }
+  };
+
+  proc.stdout?.on('data', onData('stdout'));
+  proc.stderr?.on('data', onData('stderr'));
+}
+
 // OA process state
 let oaProcess = null;
 let oaConfig = {
@@ -216,6 +243,72 @@ async function findAvailablePort(startPort, maxAttempts) {
   return null;
 }
 
+function waitForPortListening(port, timeoutMs = 8000, intervalMs = 120) {
+  const startedAt = Date.now();
+  return new Promise((resolve, reject) => {
+    const attempt = () => {
+      const socket = net.connect({ host: '127.0.0.1', port }, () => {
+        socket.destroy();
+        resolve(true);
+      });
+
+      socket.on('error', () => {
+        socket.destroy();
+        if (Date.now() - startedAt >= timeoutMs) {
+          reject(new Error(`timeout_waiting_for_port:${port}`));
+          return;
+        }
+        setTimeout(attempt, intervalMs);
+      });
+    };
+
+    attempt();
+  });
+}
+
+async function spawnOaAndWaitReady({ configPath, port }) {
+  const oaArgs = ['serve', '--config', configPath, '--port', String(port), '--no-open'];
+
+  const oaSpawn = spawn('oa', oaArgs, {
+    cwd: path.dirname(configPath),
+    env: { ...process.env },
+    detached: false
+  });
+
+  attachOaLogCapture(oaSpawn);
+
+  // Mirror to Nexus logs (stderr is often the useful part)
+  oaSpawn.stdout?.on('data', (data) => {
+    logger.info(`OA stdout: ${data.toString().trim()}`);
+  });
+  oaSpawn.stderr?.on('data', (data) => {
+    logger.warn(`OA stderr: ${data.toString().trim()}`);
+  });
+
+  // Fail fast if spawn errors or exits before the port is listening
+  const exitOrError = new Promise((_, reject) => {
+    oaSpawn.once('error', (err) => reject(err));
+    oaSpawn.once('close', (code, signal) => {
+      reject(new Error(`oa_process_exited_early: code=${code} signal=${signal ?? 'none'}`));
+    });
+  });
+
+  // If pid is missing, treat as spawn failure (common with ENOENT)
+  if (!oaSpawn.pid) {
+    // Let event loop flush error handlers / stderr
+    await new Promise((r) => setTimeout(r, 50));
+    throw new Error('oa_spawn_failed_no_pid');
+  }
+
+  // Wait for readiness (port opens) or early exit/error
+  await Promise.race([
+    waitForPortListening(port, 8000, 120),
+    exitOrError
+  ]);
+
+  return oaSpawn;
+}
+
 // Check if OA process is running by PID
 function isProcessRunning(pid) {
   try {
@@ -229,26 +322,30 @@ function isProcessRunning(pid) {
 // Get OA status
 async function getOaStatus() {
   const pidFile = loadOaPidFile();
+  const { port: pidPort, pid, startedByNexus } = pidFile || {};
+  const port = pidPort || OA_DEFAULT_PORT;
 
-  if (!pidFile) {
+  // 1) Nexus-managed: verify PID still alive
+  if (pidFile && startedByNexus && pid && isProcessRunning(pid)) {
+    // Double-check the port is actually listening (PID might be stale after crash)
+    const portInUse = await checkPort(port);
+    if (portInUse) {
+      return { running: true, port, pid, url: `http://127.0.0.1:${port}`, startedByNexus };
+    }
+    // PID exists but port not listening — OA died, clear stale PID
+    clearOaPidFile();
     return { running: false, port: OA_DEFAULT_PORT };
   }
 
-  const { port, pid, startedByNexus } = pidFile;
-
-  // Check if process is still running
-  if (startedByNexus && pid && isProcessRunning(pid)) {
-    return {
-      running: true,
-      port,
-      pid,
-      url: `http://127.0.0.1:${port}`,
-      startedByNexus
-    };
+  // 2) No PID file OR stale PID: fall back to TCP port check
+  //    This detects externally-started OA (not launched by Nexus)
+  const portInUse = await checkPort(OA_DEFAULT_PORT);
+  if (portInUse) {
+    return { running: true, port: OA_DEFAULT_PORT, url: `http://127.0.0.1:${OA_DEFAULT_PORT}`, startedByNexus: false };
   }
 
-  // Process not running, clear stale PID file
-  if (startedByNexus) {
+  // Not running — clean up stale PID if any
+  if (pidFile?.startedByNexus) {
     clearOaPidFile();
   }
 
@@ -576,26 +673,22 @@ app.post('/api/oa/start', async (req, res) => {
       return res.status(500).json({ error: 'No available port found' });
     }
 
-    // Spawn OA process
-    const oaArgs = ['serve', '--config', configPath, '--port', String(port), '--no-open'];
+    // Spawn OA process and wait until it's actually listening.
+    let oaSpawn;
+    try {
+      oaSpawn = await spawnOaAndWaitReady({ configPath, port });
+    } catch (error) {
+      logger.error('Failed to start OA service (spawn/wait)', { error: error?.message || String(error) });
+      clearOaPidFile();
+      return res.status(500).json({
+        error: 'failed_to_start_oa_service',
+        detail: error?.message || String(error),
+        lastOutput: oaLastOutput
+      });
+    }
 
-    const oaSpawn = spawn('oa', oaArgs, {
-      cwd: path.dirname(configPath),
-      env: { ...process.env },
-      detached: false
-    });
-
-    // Save PID file
+    // Save PID file (only after we know it started)
     saveOaPidFile(port, oaSpawn.pid);
-
-    // Handle process events
-    oaSpawn.stdout?.on('data', (data) => {
-      logger.info(`OA stdout: ${data.toString().trim()}`);
-    });
-
-    oaSpawn.stderr?.on('data', (data) => {
-      logger.info(`OA stderr: ${data.toString().trim()}`);
-    });
 
     oaSpawn.on('error', (err) => {
       logger.error('OA process error', { error: err.message });
@@ -608,9 +701,6 @@ app.post('/api/oa/start', async (req, res) => {
     });
 
     oaProcess = oaSpawn;
-
-    // Wait a bit for the server to start
-    await new Promise(resolve => setTimeout(resolve, 1000));
 
     res.json({
       success: true,
@@ -648,144 +738,9 @@ app.get('/api/oa/logs', (req, res) => {
   // OA doesn't have a standard log file, but we can provide info
   res.json({
     message: 'OA logs are streamed to server console',
-    logLocation: 'Nexus server console'
+    logLocation: 'Nexus server console',
+    lastOutput: oaLastOutput
   });
-});
-
-// GET /api/wdg-health — WDG Health dashboard data from monitor.db
-// Returns latest run, 7d/30d trends, and recent failures from breakdown JSON
-app.get('/api/wdg-health', async (req, res) => {
-  try {
-    const { execSync: execSyncImport } = await import('child_process');
-    const dbPath = path.join(process.cwd(), 'oa-project', 'data', 'monitor.db');
-
-    const rowsRaw = execSyncImport(
-      `sqlite3 "${dbPath}" "SELECT date, goal, metric, value, unit, breakdown FROM goal_metrics WHERE goal = 'wdg_health' ORDER BY date DESC" -json`,
-      { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 }
-    );
-    const rows = JSON.parse(rowsRaw || '[]');
-
-    const metricNames = [
-      'success_rate', 'error_rate', 'p95_latency_ms',
-      // VPS healthcheck metrics
-      'vps_cpu_usage', 'vps_ram_usage', 'vps_disk_usage',
-      'vps_docker_containers', 'vps_nginx_up',
-      'vps_net_latency_gw', 'vps_net_latency_ext', 'vps_load_avg',
-    ];
-    const latest = {};
-    const trends = { '7d': {}, '30d': {} };
-    const failures = [];
-    const cutoff7d = new Date(); cutoff7d.setDate(cutoff7d.getDate() - 7);
-    const cutoff30d = new Date(); cutoff30d.setDate(cutoff30d.getDate() - 30);
-
-    for (const m of metricNames) {
-      latest[m] = null;
-      trends['7d'][m] = [];
-      trends['30d'][m] = [];
-    }
-
-    const seen = new Set();
-    for (const row of rows) {
-      const m = row.metric;
-      if (!metricNames.includes(m)) continue;
-
-      if (!latest[m]) {
-        latest[m] = { date: row.date, value: row.value, unit: row.unit, breakdown: row.breakdown || null };
-      }
-
-      const dateKey = `${m}::${row.date}`;
-      if (!seen.has(dateKey)) {
-        seen.add(dateKey);
-        const d = new Date(`${row.date}T00:00:00`);
-        if (d >= cutoff30d) trends['30d'][m].push({ date: row.date, value: row.value });
-        if (d >= cutoff7d) trends['7d'][m].push({ date: row.date, value: row.value });
-      }
-
-      if (row.breakdown) {
-        try {
-          const bd = JSON.parse(row.breakdown);
-          const fails = (bd.checks || []).filter((c) => c.status === 'fail');
-          for (const f of fails) {
-            failures.push({ date: row.date, ts: bd.ts, check: f.name, status: f.status, http: f.http, latency_ms: f.latency_ms, detail: f.detail });
-          }
-        } catch (_) {}
-      }
-    }
-
-    for (const m of metricNames) {
-      trends['7d'][m].sort((a, b) => a.date.localeCompare(b.date));
-      trends['30d'][m].sort((a, b) => a.date.localeCompare(b.date));
-    }
-    failures.sort((a, b) => b.date.localeCompare(a.date));
-
-    const latestBdRaw = latest['success_rate']?.breakdown || latest['error_rate']?.breakdown;
-    const latestBd = latestBdRaw ? JSON.parse(latestBdRaw) : null;
-    const overall = latestBd?.overall || 'unknown';
-
-    res.json({
-      latest: {
-        date: latest['success_rate']?.date || null,
-        overall,
-        success_rate: latest['success_rate']?.value ?? null,
-        error_rate: latest['error_rate']?.value ?? null,
-        p95_latency_ms: latest['p95_latency_ms']?.value ?? null,
-        unit: latest['success_rate']?.unit || '%',
-        total_checks: latestBd?.summary?.total ?? null,
-        passed_checks: latestBd?.summary?.passed ?? null,
-        failed_checks: latestBd?.summary?.failed ?? null,
-      },
-      trends,
-      failures: failures.slice(0, 50),
-    });
-  } catch (error) {
-    res.status(500).json({ error: error?.message || String(error) });
-  }
-});
-
-// POST /api/wdg-health-put — 接收 VPS healthcheck push 数据，写入 monitor.db
-// Body: { node, timestamp, checks: [{metric, value, unit}] }
-app.post('/api/wdg-health-put', async (req, res) => {
-  try {
-    const { execSync } = await import('child_process');
-    const dbPath = path.join(process.cwd(), 'oa-project', 'data', 'monitor.db');
-
-    // Bearer token 认证
-    const authHeader = req.headers['authorization'] || '';
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-    const expectedToken = process.env.WDG_HEALTH_API_TOKEN || 'wdg_health_secret_2026';
-    if (token !== expectedToken) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    const { node = 'vps-1', timestamp, checks = [] } = req.body || {};
-    if (!timestamp || !Array.isArray(checks) || checks.length === 0) {
-      return res.status(400).json({ error: 'Invalid payload: need {node, timestamp, checks[]}' });
-    }
-
-    // date 取 timestamp 的日期部分（UTC）
-    const dateStr = timestamp.slice(0, 10);  // YYYY-MM-DD
-
-    // 写入每条 check 到 goal_metrics
-    const values = checks.map(c => {
-      const metric = `vps_${c.metric}`;
-      const value = c.value;
-      const unit = c.unit || '';
-      // breakdown 存完整 JSON
-      const breakdown = JSON.stringify({ node, ts: timestamp, ...c });
-      return `SELECT datetime('now'), '${dateStr}', 'wdg_health', '${metric.replace(/'/g, "''")}', ${value}, '${unit.replace(/'/g, "''")}', '${breakdown.replace(/'/g, "''")}'`;
-    }).join('\n  UNION ALL\n  ');
-
-    const sql = `
-      INSERT OR REPLACE INTO goal_metrics (created_at, date, goal, metric, value, unit, breakdown)
-      ${values}
-    `;
-
-    execSync(`sqlite3 "${dbPath}" "${sql.replace(/"/g, '\\"')}"`, { encoding: 'utf-8', timeout: 10000 });
-
-    res.json({ ok: true, node, timestamp, count: checks.length });
-  } catch (error) {
-    res.status(500).json({ error: error?.message || String(error) });
-  }
 });
 
 // Get all agents grouped by category with collapsible sections
@@ -1958,35 +1913,31 @@ server.listen(PORT, '0.0.0.0', async () => {
       if (fs.existsSync(defaultConfigPath)) {
         const port = await findAvailablePort(OA_DEFAULT_PORT, OA_MAX_PORT_SCAN);
         if (port) {
-          const oaArgs = ['serve', '--config', defaultConfigPath, '--port', String(port), '--no-open'];
-          const oaSpawn = spawn('oa', oaArgs, {
-            cwd: path.dirname(defaultConfigPath),
-            env: { ...process.env },
-            detached: false
-          });
-
-          saveOaPidFile(port, oaSpawn.pid);
-
-          oaSpawn.stdout?.on('data', (data) => {
-            logger.info(`OA stdout: ${data.toString().trim()}`);
-          });
-
-          oaSpawn.stderr?.on('data', (data) => {
-            logger.info(`OA stderr: ${data.toString().trim()}`);
-          });
-
-          oaSpawn.on('error', (err) => {
-            logger.error('OA process error', { error: err.message });
+          let oaSpawn;
+          try {
+            oaSpawn = await spawnOaAndWaitReady({ configPath: defaultConfigPath, port });
+          } catch (error) {
+            logger.error('OA auto-start failed (spawn/wait)', { error: error?.message || String(error) });
             clearOaPidFile();
-          });
+            oaSpawn = null;
+          }
 
-          oaSpawn.on('close', (code) => {
-            logger.info('OA process closed', { code });
-            clearOaPidFile();
-          });
+          if (oaSpawn) {
+            saveOaPidFile(port, oaSpawn.pid);
 
-          oaProcess = oaSpawn;
-          logger.info('OA service auto-started', { port, pid: oaSpawn.pid });
+            oaSpawn.on('error', (err) => {
+              logger.error('OA process error', { error: err.message });
+              clearOaPidFile();
+            });
+
+            oaSpawn.on('close', (code) => {
+              logger.info('OA process closed', { code });
+              clearOaPidFile();
+            });
+
+            oaProcess = oaSpawn;
+            logger.info('OA service auto-started', { port, pid: oaSpawn.pid });
+          }
         } else {
           logger.warn('OA auto-start skipped: no available port found', { startPort: OA_DEFAULT_PORT, maxScan: OA_MAX_PORT_SCAN });
         }

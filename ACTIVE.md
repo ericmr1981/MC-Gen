@@ -1,27 +1,40 @@
 # ACTIVE.md — Current WIP
 
+> This file lives inside the project repo. The workspace root WORKSPACE.md is only an index.
+
 ## Current Project
 - **Name**: workspace
-- **Repo**: /Users/ericmr/Documents/GitHub/Nexus/MC-Gen
-- **Task**: --mode llm --complexity 5 MC-Gen sprint-2: 在本地(Mac mini)配置每天04:00运行 scripts/wdg_healthcheck.py，将结果写入 OA monitor.db，并端到端验证：monitor.db写入成功、/api/wdg-health 返回真实数据。
-- **Started**: 2026-04-02T13:47:27.363Z
+- **Repo**: /Users/ericmr/Documents/GitHub/MC-Gen
+- **Task**: MC-Gen: 修复 OA dashboard 总是挂掉（假 running / iframe 连接失败），并修复右上角 OA 按钮无效（点击后无可用 dashboard 或状态不准）
+- **Mode**: llm
+- **Started**: 2026-04-06T05:19:47.923Z
 - **Status**: running
 - **Sprints**: sprint-1
 
 ## Sprint Plan
-- **sprint-1**: engineering-backend-architect [SCOPE_MULTI] [SPEC_API]| deps: none
+- **sprint-1**: engineering-senior-developer | deps: none | attachments: full
 ## Matrix Flags
-- [SCOPE_MULTI] scope=multi-file — affects 20 files, confirm with Boss
+- [COMPLEXITY_MED] complexity=5 — consider multi-sprint
+## Continue Gate (v5 preview)
+- **Final Oracle**: Live acceptance for "MC-Gen: 修复 OA dashboard 经常挂掉（假 running / iframe 连接失败），并修复右上角 OA 按钮无效（点击后无可用 dashboard 或状态不准）" plus local oracle: cd client && npm run build && node tests/verify-phase1.js && bash scripts/run_change_guard.sh
+- **Local Oracle**: cd client && npm run build && node tests/verify-phase1.js && bash scripts/run_change_guard.sh
+- **Current Blocker**: Not yet verified against final oracle. Replace with concrete blocker after the first failed live check.
+- **Round Outcome**: retry_with_new_bet
+- **Stop Allowed**: no
+- **Next Forced Bet**: Execute one bounded bet, then run cd client && npm run build && node tests/verify-phase1.js && bash scripts/run_change_guard.sh; if final oracle still fails, record evidence delta and launch the next repair step.
+- **Evidence Delta**: new-branch
+- **No-Evidence Rounds**: 0
+- **Last Evidence**: none yet
+- **Evidence Artifact**: none
+- **Result Status**: pending
+- **Pivot Trigger**: 2 no-evidence rounds on same branch
+
 
 ## Master Brief
-harness/assignments/master-brief-1775137647363.md
+/Users/ericmr/Documents/GitHub/MC-Gen/harness/assignments/master-brief-1775452787923.md
 
-## Dispatch Rules (v3 — enforced)
-- ALL dispatches go through harness.js (this run)
-- LLM task profiling + enhanced brief generated
-- Matrix-driven decisions: complexity/risk/scope flags affect acceptance criteria
-- Formal failure recovery: L0/L1/L2, max 2 retries per sprint
-- Multi-agent: dependency-ordered, not parallel
+## Version
+harness.js v5-preview | per-project ACTIVE.md | workspace index | ContextAssembler
 
 ---
-*Last updated: 2026-04-02T13:47:27.363Z*
+*Last updated: 2026-04-06T05:19:47.923Z*

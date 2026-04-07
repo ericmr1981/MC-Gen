@@ -1,23 +1,23 @@
 {
   "sprintId": "sprint-1",
-  "taskDescription": "开始开发 WDG Health 模块（类似 Cron Reliability）：每天 4:00 运行 WDG healthcheck，将结果写入 OA monitor.db，并在 MC-Gen 的 OA Dashboard UI 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。",
+  "taskDescription": "MC-Gen: 修复 OA dashboard 总是挂掉（假 running / iframe 连接失败），并修复右上角 OA 按钮无效（点击后无可用 dashboard 或状态不准）",
   "lifecycle": {
     "mode": "dispatch",
     "consumedResult": false,
     "goalClosed": false
   },
   "continueGate": {
-    "branchKey": "/Users/ericmr/Documents/GitHub/Nexus/MC-Gen::开始开发 wdg health 模块（类似 cron reliability）：每天 4:00 运行 wdg healthcheck，将结果写入 oa monitor.db，并在 mc-gen 的 oa dashboard ui 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。",
-    "evidenceFingerprint": "{\"task\":\"开始开发 wdg health 模块（类似 cron reliability）：每天 4:00 运行 wdg healthcheck，将结果写入 oa monitor.db，并在 mc-gen 的 oa dashboard ui 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。\",\"complexity\":9,\"taskType\":\"multi\",\"riskLevel\":\"medium\",\"scopeGuess\":\"multi-file\",\"buildCmd\":\"npm run build\",\"guardCmd\":\"unknown\",\"localOracle\":\"npm run build && node tests/verify-phase1.js\",\"topFiles\":[\"server/index.js\",\"server/usage/external-usage-service.js\",\"server/usage/usage-manager.js\",\"client/src/components/TokenBenchPage.tsx\",\"server/tokenbench.js\"]}",
-    "finalOracle": "Live acceptance for \"开始开发 WDG Health 模块（类似 Cron Reliability）：每天 4:00 运行 WDG healthcheck，将结果写入 OA monitor.db，并在 MC-Gen 的 OA Dashboard UI 中展示该模块（趋势/成功率/延迟/最近失败原因），支持仅失败告警。\" plus local oracle: npm run build && node tests/verify-phase1.js",
+    "branchKey": "/Users/ericmr/Documents/GitHub/MC-Gen::mc-gen: 修复 oa dashboard 总是挂掉（假 running / iframe 连接失败），并修复右上角 oa 按钮无效（点击后无可用 dashboard 或状态不准）",
+    "evidenceFingerprint": "{\"task\":\"mc-gen: 修复 oa dashboard 总是挂掉（假 running / iframe 连接失败），并修复右上角 oa 按钮无效（点击后无可用 dashboard 或状态不准）\",\"complexity\":5,\"taskType\":\"single\",\"riskLevel\":\"medium\",\"scopeGuess\":\"multi-file\",\"buildCmd\":\"cd client && npm run build\",\"guardCmd\":\"bash scripts/run_change_guard.sh\",\"localOracle\":\"cd client && npm run build && node tests/verify-phase1.js && bash scripts/run_change_guard.sh\",\"topFiles\":[\"server/index.js\",\"server/usage/external-usage-service.js\",\"server/usage/usage-manager.js\",\"client/src/components/TokenBenchPage.tsx\",\"server/tokenbench.js\"]}",
+    "finalOracle": "Live acceptance for \"MC-Gen: 修复 OA dashboard 经常挂掉（假 running / iframe 连接失败），并修复右上角 OA 按钮无效（点击后无可用 dashboard 或状态不准）\" plus local oracle: cd client && npm run build && node tests/verify-phase1.js && bash scripts/run_change_guard.sh",
     "currentBlocker": "Not yet verified against final oracle. Replace with concrete blocker after the first failed live check.",
     "roundOutcome": "retry_with_new_bet",
     "stopAllowed": "no",
-    "nextForcedBet": "Execute one bounded bet, then run npm run build && node tests/verify-phase1.js; if final oracle still fails, record evidence delta and launch the next repair step.",
+    "nextForcedBet": "Execute one bounded bet, then run cd client && npm run build && node tests/verify-phase1.js && bash scripts/run_change_guard.sh; if final oracle still fails, record evidence delta and launch the next repair step.",
     "evidenceDelta": "new-branch",
     "noEvidenceRounds": 0,
     "pivotAfterNoEvidenceRounds": 2,
-    "localOracle": "npm run build && node tests/verify-phase1.js",
+    "localOracle": "cd client && npm run build && node tests/verify-phase1.js && bash scripts/run_change_guard.sh",
     "evidenceArtifact": "",
     "resultStatus": "",
     "failureType": "",
@@ -36,5 +36,5 @@
     "consumedAt": "",
     "consumedFrom": ""
   },
-  "updatedAt": "2026-04-01T16:22:36.088Z"
+  "updatedAt": "2026-04-06T05:19:47.924Z"
 }

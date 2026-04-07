@@ -5,4 +5,4 @@
 ## Active Projects
 | Project | ACTIVE.md Path | Status | Last Updated |
 |---------|----------------|--------|--------------|
-| workspace | `/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/ACTIVE.md` | running | 2026-04-01 16:22 |
+| workspace | `/Users/ericmr/Documents/GitHub/MC-Gen/ACTIVE.md` | running | 2026-04-06 05:19 |

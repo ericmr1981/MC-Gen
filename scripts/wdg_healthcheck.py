@@ -154,13 +154,19 @@ def write_goal_metrics(
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+
+    # Resolve repo root so this script keeps working even if you move the MC-Gen folder.
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    default_creds = os.path.join(repo_root, "oa-project", "data", "wdg_ui_credentials.json")
+    default_oa_db = os.path.join(repo_root, "oa-project", "data", "monitor.db")
+
     ap.add_argument("--ui-base", default="http://112.124.18.246:3002", help="WDG UI base URL")
     ap.add_argument("--mb-base", default="http://112.124.18.246:8082", help="Metabase base URL")
     ap.add_argument("--vps-host", default="112.124.18.246", help="VPS host (for SSH reading metabase key)")
     ap.add_argument("--vps-ssh-key", default="/Users/ericmr/.ssh/wdg_vps_ed25519", help="SSH key path")
     ap.add_argument("--metabase-key-path", default="/root/.secrets/metabase_api_key", help="VPS metabase api key path")
-    ap.add_argument("--creds", default="/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/oa-project/data/wdg_ui_credentials.json", help="UI login creds json")
-    ap.add_argument("--oa-db", default="/Users/ericmr/Documents/GitHub/Nexus/MC-Gen/oa-project/data/monitor.db", help="OA SQLite db path")
+    ap.add_argument("--creds", default=default_creds, help="UI login creds json")
+    ap.add_argument("--oa-db", default=default_oa_db, help="OA SQLite db path")
     ap.add_argument("--write-oa", action="store_true", help="write results to OA db")
     ap.add_argument("--brand", default="bonjur", help="brand_code used for API smoke")
     ap.add_argument("--month", default="2026-03", help="month used for API smoke")
