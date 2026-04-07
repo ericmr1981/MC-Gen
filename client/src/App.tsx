@@ -7,7 +7,6 @@ import { UsageBreakdownPanel } from './components/UsageBreakdownPanel';
 import CronManagerPage from './components/CronManagerPage';
 import CronJobDetail from './components/CronJobDetail';
 import CronJobEdit from './components/CronJobEdit';
-import OpenClawProxyPage from './components/OpenClawProxyPage';
 import OAPage from './components/OAPage';
 import { BitOfficeEmbed } from './components/BitOfficeEmbed';
 import './components/BitOfficeEmbed.css';
@@ -177,9 +176,6 @@ function AppContent() {
           <NavLink to="/cron" className={({ isActive }) => `route-tab ${isActive ? 'is-active' : ''}`}>
             Cron
           </NavLink>
-          <NavLink to="/openclaw-proxy" className={({ isActive }) => `route-tab ${isActive ? 'is-active' : ''}`}>
-            OpenClaw Proxy
-          </NavLink>
           <NavLink to="/oa" className={({ isActive }) => `route-tab ${isActive ? 'is-active' : ''}`}>
             OA Dashboard
           </NavLink>
@@ -249,7 +245,6 @@ function AppContent() {
         <Route path="/cron" element={<CronManagerPage />} />
         <Route path="/cron/:jobId" element={<CronJobDetail />} />
         <Route path="/cron/:jobId/edit" element={<CronJobEdit />} />
-        <Route path="/openclaw-proxy" element={<OpenClawProxyPage />} />
         <Route path="/oa" element={<OAPage />} />
         <Route path="/embed" element={<BitOfficeEmbed />} />
         <Route path="/tokenbench" element={<TokenBenchPage />} />
